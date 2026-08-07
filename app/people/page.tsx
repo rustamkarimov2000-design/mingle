@@ -10,7 +10,7 @@ interface Person {
   name: string;
   age: number;
   city: string;
-  avatar: string;
+  avatarBg: string;
   bio: string;
   interests: string[];
   online: boolean;
@@ -22,7 +22,7 @@ const initialPeople: Person[] = [
     name: "Екатерина Иванова",
     age: 24,
     city: "Москва",
-    avatar: "https://ui-avatars.com/api/?name=Екатерина+Иванова&background=f472b6&color=fff",
+    avatarBg: "f472b6",
     bio: "Люблю путешествия, кофе и веб-дизайн ✨",
     interests: ["Путешествия", "Дизайн", "Кофе"],
     online: true,
@@ -32,7 +32,7 @@ const initialPeople: Person[] = [
     name: "Дмитрий Петров",
     age: 28,
     city: "Санкт-Петербург",
-    avatar: "https://ui-avatars.com/api/?name=Дмитрий+Петров&background=60a5fa&color=fff",
+    avatarBg: "60a5fa",
     bio: "Frontend developer, бегаю марафоны 🏃‍♂️",
     interests: ["Кодинг", "Бег", "Музыка"],
     online: false,
@@ -42,7 +42,7 @@ const initialPeople: Person[] = [
     name: "Ольга Сидорова",
     age: 22,
     city: "Казань",
-    avatar: "https://ui-avatars.com/api/?name=Ольга+Сидорова&background=34d399&color=fff",
+    avatarBg: "34d399",
     bio: "Фотограф, ищу единомышленников для творческих проектов 📸",
     interests: ["Фотография", "Искусство", "Кино"],
     online: true,
@@ -52,12 +52,15 @@ const initialPeople: Person[] = [
     name: "Алексей Смирнов",
     age: 26,
     city: "Новосибирск",
-    avatar: "https://ui-avatars.com/api/?name=Алексей+Смирнов&background=fbbf24&color=fff",
+    avatarBg: "fbbf24",
     bio: "Люблю настолки и походы 🏕",
     interests: ["Настолки", "Походы", "IT"],
     online: true,
   },
 ];
+
+const getAvatarUrl = (name: string, bg: string) =>
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=${bg}&color=fff`;
 
 export default function PeoplePage() {
   const router = useRouter();
@@ -70,13 +73,11 @@ export default function PeoplePage() {
       person.city.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Переход в чат с передачей ID пользователя через query-параметр
   const handleOpenChat = (person: Person) => {
-    // Сохраняем информацию о пользователе, чтобы в /messages её можно было подтянуть
     const pendingChat = {
       id: person.id,
       name: person.name,
-      avatar: person.avatar,
+      avatar: getAvatarUrl(person.name, person.avatarBg),
       online: person.online,
     };
     localStorage.setItem("mingle_pending_chat", JSON.stringify(pendingChat));
@@ -94,7 +95,6 @@ export default function PeoplePage() {
           </aside>
 
           <section className="col-span-1 space-y-6 lg:col-span-9">
-            {/* Поиск */}
             <div className="rounded-3xl border bg-white p-6 shadow-sm">
               <h1 className="mb-4 text-2xl font-bold text-gray-900">
                 Знакомства в Mingle
@@ -108,7 +108,6 @@ export default function PeoplePage() {
               />
             </div>
 
-            {/* Сетка пользователей */}
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {filteredPeople.map((person) => (
                 <div
@@ -119,7 +118,7 @@ export default function PeoplePage() {
                     <div className="flex items-center gap-4 mb-4">
                       <div className="relative">
                         <img
-                          src={person.avatar}
+                          src={getAvatarUrl(person.name, person.avatarBg)}
                           alt={person.name}
                           className="h-16 w-16 rounded-full border object-cover"
                         />
