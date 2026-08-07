@@ -10,10 +10,9 @@ interface AIAssistantModalProps {
 export default function AIAssistantModal({ isOpen, onClose }: AIAssistantModalProps) {
   const [activeTab, setActiveTab] = useState<"phrase" | "profile">("phrase");
 
+  const [loading, setLoading] = useState(false);
+  const [aiText, setAiText] = useState("");
 
-const [loading, setLoading] = useState(false);
-const [aiText, setAiText] = useState("");
-  // Варианты фраз для знакомства
   const phrases = [
     "«Привет! Смотрю, у нас общие интересы. Как проходит твоя неделя? 😊»",
     "«Если бы твоё идеальное утро было напитком, это был бы раф, флэт уайт или просто кофе? ☕️»",
@@ -23,7 +22,6 @@ const [aiText, setAiText] = useState("");
     "«Ого, классные фото! Посоветуешь крутое заведение или кофейню, где ты любишь бывать?»",
   ];
 
-  // Варианты советов по улучшению анкеты
   const profileTips = [
     "💡 Добавь еще 2-3 фото из повседневной жизни, чтобы профиль выглядел более открытым и настоящим!",
     "💡 Укажи свои любимые хобби и рост — это повышает количество мэтчей на 40%!",
@@ -37,36 +35,35 @@ const [aiText, setAiText] = useState("");
 
   if (!isOpen) return null;
 
-  // Смена текущего варианта
- const handleGenerateNew = async () => {
-  setLoading(true);
-  setIsCopied(false);
+  const handleGenerateNew = async () => {
+    setLoading(true);
+    setIsCopied(false);
 
-  try {
-    const response = await fetch("/api/ai", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        type: activeTab,
-        prompt:
-          activeTab === "phrase"
-            ? "Придумай первое сообщение девушке в приложении знакомств."
-            : "Дай совет как улучшить мою анкету.",
-      }),
-    });
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: activeTab,
+          prompt:
+            activeTab === "phrase"
+              ? "Придумай первое сообщение девушке в приложении знакомств."
+              : "Дай совет как улучшить мою анкету.",
+        }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    setAiText(data.text);
-  } catch (e) {
-    setAiText("Не удалось получить ответ 😔");
-  }
+      setAiText(data.text);
+    } catch (e) {
+      setAiText("Не удалось получить ответ 😔");
+    }
 
-  setLoading(false);
-};
-  // Копирование фразы в буфер обмена
+    setLoading(false);
+  };
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setIsCopied(true);
@@ -79,8 +76,7 @@ const [aiText, setAiText] = useState("");
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative space-y-6 animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Шапка модального окна */}
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <span className="text-2xl">🤖</span>
@@ -98,14 +94,13 @@ const [aiText, setAiText] = useState("");
           Выберите, чем я могу помочь вам прямо сейчас:
         </p>
 
-        {/* Переключатели / Табы */}
         <div className="grid grid-cols-2 gap-2">
           <button
-  onClick={() => {
-    setActiveTab("profile");
-    setAiText("");
-    setIsCopied(false);
-  }}
+            onClick={() => {
+              setActiveTab("phrase");
+              setAiText("");
+              setIsCopied(false);
+            }}
             className={`py-3 px-3 rounded-2xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 border ${
               activeTab === "phrase"
                 ? "border-purple-600 bg-purple-50/60 text-purple-700 shadow-xs"
@@ -118,6 +113,7 @@ const [aiText, setAiText] = useState("");
           <button
             onClick={() => {
               setActiveTab("profile");
+              setAiText("");
               setIsCopied(false);
             }}
             className={`py-3 px-3 rounded-2xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 border ${
@@ -130,14 +126,11 @@ const [aiText, setAiText] = useState("");
           </button>
         </div>
 
-        {/* Контент с генерируемым ответом */}
         <div className="bg-gray-50 border border-gray-100 rounded-2xl p-5 space-y-4">
           <p className="text-xs text-gray-800 font-medium leading-relaxed">
-           {loading
-  ? "Думаю..."
-  : aiText || currentContent}
+            {loading ? "Думаю..." : aiText || currentContent}
           </p>
-          
+
           <div className="flex items-center justify-between pt-1 border-t border-gray-100/60">
             <button
               onClick={handleGenerateNew}
@@ -149,11 +142,6 @@ const [aiText, setAiText] = useState("");
             {activeTab === "phrase" && (
               <button
                 onClick={() => handleCopy(aiText || currentContent)}
-className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer ${
-  isCopied
-    ? "bg-emerald-500 text-white"
-    : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-100"
-}`}
                 className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer ${
                   isCopied
                     ? "bg-emerald-500 text-white"
@@ -166,7 +154,6 @@ className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition cursor-point
           </div>
         </div>
 
-        {/* Кнопка «Готово» */}
         <button
           onClick={onClose}
           className="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-3.5 rounded-2xl text-xs transition cursor-pointer"
