@@ -263,7 +263,13 @@ export default function EditProfilePage() {
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12 select-none">
       <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/profile" className="text-xs font-bold text-gray-500 hover:text-gray-900 transition">
-          ← Назад в профиль
+         <button
+  type="button"
+  onClick={() => router.push("/profile")}
+  className="flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-pink-500 transition cursor-pointer"
+>
+  ← Назад в профиль
+</button>
         </Link>
         <span className="text-sm font-black tracking-wider text-gray-900">РЕДАКТИРОВАНИЕ</span>
         <div className="w-8"></div>
