@@ -151,7 +151,7 @@ export default function EditProfilePage() {
       setMessage(null);
 
       const fileExt = file.name.split(".").pop();
-      const filePath = `${profile.id}/${Math.random()}.${fileExt}`;
+      const filePath = profile.id + "/" + Math.random() + "." + fileExt;
 
       const { error: uploadError } = await supabase.storage
         .from("avatars")
