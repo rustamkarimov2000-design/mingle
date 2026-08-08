@@ -264,18 +264,22 @@ export default function EditProfilePage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12">
-      <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between relative z-50">
+      <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between relative z-[9999]">
         <button
           type="button"
-          onClick={handleBack}
-          className="text-xs font-bold text-gray-500 hover:text-pink-600 transition py-2 pr-4 cursor-pointer flex items-center gap-1 active:scale-95"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("Клик по кнопке Назад сработал");
+            window.location.assign("/profile");
+          }}
+          className="text-xs font-bold text-pink-600 hover:text-pink-800 transition py-3 px-4 cursor-pointer flex items-center gap-1 bg-white rounded-xl shadow-sm border border-gray-200 active:scale-95"
         >
           ← Назад в профиль
         </button>
         <span className="text-sm font-black tracking-wider text-gray-900">РЕДАКТИРОВАНИЕ</span>
         <div className="w-8"></div>
       </header>
-
       <main className="max-w-md mx-auto px-4 space-y-6">
         <div className="flex flex-col items-center space-y-3">
           <div className="relative w-28 h-28 rounded-3xl overflow-hidden shadow-md border-2 border-white bg-gray-200">
