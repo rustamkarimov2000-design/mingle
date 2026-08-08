@@ -6,6 +6,20 @@ import Link from "next/link";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
 
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
 interface Candidate {
   id: string;
   name: string;
@@ -15,6 +29,7 @@ interface Candidate {
   avatar: string;
   photos: string[];
   interests: string[];
+  distanceKm: number | null;
 }
 
 export default function DiscoverPage() {
@@ -50,13 +65,16 @@ export default function DiscoverPage() {
 
     const { data: myProfile } = await supabase
       .from("profiles")
-      .select("avatar")
+      .select("avatar, latitude, longitude")
       .eq("id", user.id)
       .single();
 
     if (myProfile?.avatar) {
       setMyAvatar(myProfile.avatar);
     }
+
+    const myLat = myProfile?.latitude;
+    const myLon = myProfile?.longitude;
 
     const { data: alreadyLiked } = await supabase
       .from("likes")
@@ -81,7 +99,6 @@ export default function DiscoverPage() {
 
     const candidateIds = data?.map((p) => p.id) || [];
 
-    // Подгружаем дополнительные фото сразу для всех кандидатов
     const { data: allPhotos } = await supabase
       .from("photos")
       .select("profile_id, url")
@@ -99,6 +116,11 @@ export default function DiscoverPage() {
 
         const uniquePhotos = Array.from(new Set([mainPhoto, ...extraPhotos]));
 
+        const distanceKm =
+          myLat && myLon && profile.latitude && profile.longitude
+            ? calculateDistance(myLat, myLon, profile.latitude, profile.longitude)
+            : null;
+
         return {
           id: profile.id,
           name: profile.name || "Без имени",
@@ -108,6 +130,7 @@ export default function DiscoverPage() {
           avatar: mainPhoto,
           photos: uniquePhotos,
           interests: ["Mingle"],
+          distanceKm,
         };
       }) || [];
 
@@ -129,7 +152,6 @@ export default function DiscoverPage() {
 
   const currentCandidate = filteredCandidates[currentIndex];
 
-  // Сбрасываем индекс фото при переходе к новому кандидату
   useEffect(() => {
     setPhotoIndex(0);
   }, [currentCandidate?.id]);
@@ -332,7 +354,6 @@ export default function DiscoverPage() {
                   NOPE
                 </motion.div>
 
-                {/* Индикаторы фото сверху (полоски как в Stories) */}
                 {currentCandidate.photos.length > 1 && (
                   <div className="absolute top-3 left-3 right-3 flex gap-1.5 z-20 pointer-events-none">
                     {currentCandidate.photos.map((_, idx) => (
@@ -346,7 +367,6 @@ export default function DiscoverPage() {
                   </div>
                 )}
 
-                {/* Невидимые зоны тапа слева/справа для листания фото */}
                 {currentCandidate.photos.length > 1 && (
                   <>
                     <button
@@ -381,6 +401,7 @@ export default function DiscoverPage() {
                     </h3>
                     <span className="bg-white/20 text-xs font-bold px-3 py-1 rounded-full backdrop-blur-md">
                       📍 {currentCandidate.city}
+                      {currentCandidate.distanceKm !== null && ` · ${currentCandidate.distanceKm} км`}
                     </span>
                   </div>
 
