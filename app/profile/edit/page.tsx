@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, ChangeEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -97,6 +96,10 @@ export default function EditProfilePage() {
 
     fetchProfile();
   }, []);
+
+  const handleBack = () => {
+    window.location.href = "/profile";
+  };
 
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
@@ -216,14 +219,6 @@ export default function EditProfilePage() {
     setPhotos((prev) => prev.filter((p) => p.id !== photoId));
   };
 
-  const handleBack = () => {
-    if (window.history.length > 1) {
-      router.back();
-    } else {
-      window.location.href = "/profile";
-    }
-  };
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -269,11 +264,11 @@ export default function EditProfilePage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12">
-      <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between">
+      <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between relative z-50">
         <button
           type="button"
           onClick={handleBack}
-          className="text-xs font-bold text-gray-500 hover:text-gray-900 transition py-2 pr-4 z-10 cursor-pointer"
+          className="text-xs font-bold text-gray-500 hover:text-pink-600 transition py-2 pr-4 cursor-pointer flex items-center gap-1 active:scale-95"
         >
           ← Назад в профиль
         </button>
