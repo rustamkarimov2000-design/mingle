@@ -2,6 +2,7 @@
 
 import { useState, useEffect, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 interface UserProfile {
@@ -95,11 +96,7 @@ export default function EditProfilePage() {
     };
 
     fetchProfile();
-  }, []);
-
-  const handleBack = () => {
-    window.location.href = "/profile";
-  };
+  }, [router, supabase]);
 
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
@@ -247,8 +244,9 @@ export default function EditProfilePage() {
     } else {
       setMessage({ text: "Профиль сохранен! Возвращаемся...", type: "success" });
       setTimeout(() => {
-        window.location.href = "/profile";
-      }, 800);
+        router.push("/profile");
+        router.refresh(); // Обновляем кэш профиля
+      }, 500);
     }
   };
 
@@ -265,18 +263,16 @@ export default function EditProfilePage() {
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12">
       <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between relative z-50">
-        <button
-          type="button"
-          onClick={() => {
-            window.location.href = "/profile";
-          }}
-          className="text-xs font-bold text-gray-500 hover:text-gray-900 transition py-2 pr-4 cursor-pointer flex items-center gap-1 active:scale-95 select-auto"
+        <Link
+          href="/profile"
+          className="text-xs font-bold text-gray-500 hover:text-gray-900 transition py-2 pr-4 cursor-pointer flex items-center gap-1 active:scale-95 select-none"
         >
           ← Назад в профиль
-        </button>
+        </Link>
         <span className="text-sm font-black tracking-wider text-gray-900">РЕДАКТИРОВАНИЕ</span>
         <div className="w-8"></div>
       </header>
+
       <main className="max-w-md mx-auto px-4 space-y-6">
         <div className="flex flex-col items-center space-y-3">
           <div className="relative w-28 h-28 rounded-3xl overflow-hidden shadow-md border-2 border-white bg-gray-200">
