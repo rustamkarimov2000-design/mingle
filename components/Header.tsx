@@ -14,12 +14,12 @@ export default function Header({
   return (
     <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-4">
-        <Link
-          href="/"
-          className="text-xl font-bold tracking-wide text-black hover:opacity-80 transition cursor-pointer select-none"
-        >
-          MINGLE
-        </Link>
+       <Link
+  href="/"
+  className="font-logo text-xl text-black hover:opacity-80 transition cursor-pointer select-none"
+>
+  mingle
+</Link>
 
         <div>
           {user ? (

@@ -71,3 +71,8 @@
     @apply bg-background text-foreground;
   }
 }
+.font-logo {
+  font-family: var(--font-poppins);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}

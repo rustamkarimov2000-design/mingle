@@ -329,7 +329,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12">
       <header className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-xl font-black tracking-wider text-gray-900">MINGLE</span>
+         <span className="font-logo text-xl text-gray-900">mingle</span>
           <span className="text-xs text-gray-400 font-medium">здесь общаются</span>
         </div>
 
