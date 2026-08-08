@@ -31,7 +31,7 @@ export default function EditProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [geoLoading, setGeoLoading] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const [profile, setProfile] = useState<UserProfile>({
@@ -76,13 +76,15 @@ export default function EditProfilePage() {
           latitude: data.latitude ?? null,
           longitude: data.longitude ?? null,
         });
+        if (data.latitude && data.longitude) {
+          setLocationStatus("done");
+        }
       } else if (error) {
         console.error("Ошибка при получении профиля:", error);
       } else {
         setProfile((prev) => ({ ...prev, id: user.id }));
       }
 
-      // Загружаем дополнительные фото
       const { data: photosData } = await supabase
         .from("photos")
         .select("*")
@@ -95,6 +97,31 @@ export default function EditProfilePage() {
 
     fetchProfile();
   }, []);
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      setMessage({ text: "Ваш браузер не поддерживает геолокацию", type: "error" });
+      return;
+    }
+
+    setLocationStatus("loading");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setProfile((prev) => ({
+          ...prev,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }));
+        setLocationStatus("done");
+        setMessage({ text: "Местоположение определено! Не забудьте сохранить.", type: "success" });
+      },
+      () => {
+        setLocationStatus("error");
+        setMessage({ text: "Не удалось определить местоположение. Разрешите доступ в браузере.", type: "error" });
+      }
+    );
+  };
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -130,7 +157,6 @@ export default function EditProfilePage() {
     }
   };
 
-  // Загрузка дополнительного фото в галерею
   const handleGalleryPhotoUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile.id) return;
@@ -190,30 +216,12 @@ export default function EditProfilePage() {
     setPhotos((prev) => prev.filter((p) => p.id !== photoId));
   };
 
-  // Определение геолокации
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      setMessage({ text: "Геолокация не поддерживается вашим браузером", type: "error" });
-      return;
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      router.back();
+    } else {
+      window.location.href = "/profile";
     }
-
-    setGeoLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setProfile((prev) => ({
-          ...prev,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }));
-        setGeoLoading(false);
-        setMessage({ text: "Местоположение определено! Нажмите 'Сохранить профиль'.", type: "success" });
-      },
-      (error) => {
-        setGeoLoading(false);
-        console.error("Ошибка геолокации:", error);
-        setMessage({ text: "Не удалось получить доступ к геолокации", type: "error" });
-      }
-    );
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -229,8 +237,8 @@ export default function EditProfilePage() {
       city: profile.city,
       avatar_url: profile.avatar_url,
       avatar: profile.avatar_url,
-      latitude: profile.latitude,
-      longitude: profile.longitude,
+      latitude: profile.latitude ?? null,
+      longitude: profile.longitude ?? null,
     };
 
     const { error } = await supabase
@@ -244,8 +252,8 @@ export default function EditProfilePage() {
     } else {
       setMessage({ text: "Профиль сохранен! Возвращаемся...", type: "success" });
       setTimeout(() => {
-        router.push("/profile");
-      }, 1000);
+        window.location.href = "/profile";
+      }, 800);
     }
   };
 
@@ -262,12 +270,13 @@ export default function EditProfilePage() {
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12">
       <header className="w-full max-w-md mx-auto px-6 h-16 flex items-center justify-between">
-        <Link 
-          href="/profile" 
+        <button
+          type="button"
+          onClick={handleBack}
           className="text-xs font-bold text-gray-500 hover:text-gray-900 transition py-2 pr-4 z-10 cursor-pointer"
         >
           ← Назад в профиль
-        </Link>
+        </button>
         <span className="text-sm font-black tracking-wider text-gray-900">РЕДАКТИРОВАНИЕ</span>
         <div className="w-8"></div>
       </header>
@@ -311,7 +320,6 @@ export default function EditProfilePage() {
           </div>
         )}
 
-        {/* Галерея дополнительных фото */}
         <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-gray-900">
@@ -388,20 +396,23 @@ export default function EditProfilePage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">Геолокация</label>
+            <label className="block text-xs font-bold text-gray-600 mb-1">Местоположение</label>
             <button
               type="button"
-              onClick={handleGetLocation}
-              disabled={geoLoading}
-              className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 font-semibold py-2.5 px-4 rounded-2xl text-xs transition flex items-center justify-center gap-2 cursor-pointer"
+              onClick={handleDetectLocation}
+              disabled={locationStatus === "loading"}
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-100 transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
-              📍 {geoLoading ? "Определяем..." : profile.latitude ? "Обновить местоположение" : "Определить моё местоположение"}
+              📍{" "}
+              {locationStatus === "loading"
+                ? "Определяем..."
+                : locationStatus === "done"
+                ? "Местоположение обновлено ✓"
+                : "Определить моё местоположение"}
             </button>
-            {profile.latitude && (
-              <p className="text-[10px] text-emerald-600 font-medium text-center mt-1">
-                ✓ Координаты сохранены ({profile.latitude.toFixed(2)}, {profile.longitude?.toFixed(2)})
-              </p>
-            )}
+            <p className="text-[10px] text-gray-400 mt-1">
+              Нужно, чтобы показывать расстояние до других людей
+            </p>
           </div>
 
           <div>
