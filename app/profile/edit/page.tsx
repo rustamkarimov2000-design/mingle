@@ -1,4 +1,3 @@
-```tsx
 "use client";
 
 import { useState, useEffect, ChangeEvent } from "react";
@@ -100,10 +99,6 @@ export default function EditProfilePage() {
     fetchProfile();
   }, [router, supabase]);
 
-  const handleBackToProfile = () => {
-    router.push("/profile");
-  };
-
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
       setMessage({
@@ -142,7 +137,7 @@ export default function EditProfilePage() {
   };
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files ? e.target.files[0] : null;
 
     if (!file || !profile.id) return;
 
@@ -177,10 +172,10 @@ export default function EditProfilePage() {
     } catch (err: any) {
       console.error("Ошибка загрузки фото:", err);
 
+      const reason = err && err.message ? err.message : "Проверьте права бакета avatars";
+
       setMessage({
-        text: `Ошибка загрузки: ${
-          err.message || "Проверьте права бакета avatars"
-        }`,
+        text: "Ошибка загрузки: " + reason,
         type: "error",
       });
     } finally {
@@ -191,7 +186,7 @@ export default function EditProfilePage() {
   const handleGalleryPhotoUpload = async (
     e: ChangeEvent<HTMLInputElement>
   ) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files ? e.target.files[0] : null;
 
     if (!file || !profile.id) return;
 
@@ -208,7 +203,7 @@ export default function EditProfilePage() {
       setMessage(null);
 
       const fileExt = file.name.split(".").pop();
-      const filePath = `${profile.id}/${Date.now()}.${fileExt}`;
+      const filePath = profile.id + "/" + Date.now() + "." + fileExt;
 
       const { error: uploadError } = await supabase.storage
         .from("photos")
@@ -220,10 +215,7 @@ export default function EditProfilePage() {
         data: { publicUrl },
       } = supabase.storage.from("photos").getPublicUrl(filePath);
 
-      const {
-        data: newPhoto,
-        error: insertError,
-      } = await supabase
+      const { data: newPhoto, error: insertError } = await supabase
         .from("photos")
         .insert({
           profile_id: profile.id,
@@ -244,8 +236,10 @@ export default function EditProfilePage() {
     } catch (err: any) {
       console.error("Ошибка загрузки фото в галерею:", err);
 
+      const reason = err && err.message ? err.message : "Неизвестная ошибка";
+
       setMessage({
-        text: `Ошибка: ${err.message}`,
+        text: "Ошибка: " + reason,
         type: "error",
       });
     } finally {
@@ -295,7 +289,7 @@ export default function EditProfilePage() {
       console.error("Ошибка сохранения профиля:", error);
 
       setMessage({
-        text: `Ошибка при сохранении: ${error.message}`,
+        text: "Ошибка при сохранении: " + error.message,
         type: "error",
       });
 
@@ -310,8 +304,7 @@ export default function EditProfilePage() {
 
     setTimeout(() => {
       router.push("/profile");
-      router.refresh();
-    }, 500);
+    }, 1000);
   };
 
   if (loading) {
@@ -326,236 +319,221 @@ export default function EditProfilePage() {
     "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500";
 
   return (
-    <div className="min-h-screen bg-gray-50 py-6">
-      <main className="max-w-md mx-auto px-4 space-y-6">
+    <main className="max-w-md mx-auto px-4 py-6 space-y-6">
+      <button
+        type="button"
+        onClick={() => router.push("/profile")}
+        className="flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-pink-500 transition cursor-pointer"
+      >
+        {"\u2190 Назад в профиль"}
+      </button>
 
-        {/* КНОПКА НАЗАД */}
-        <button
-          type="button"
-          onClick={handleBackToProfile}
-          className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-pink-500 transition cursor-pointer"
-        >
-          ← Назад в профиль
-        </button>
+      <h1 className="text-xl font-bold text-gray-900">
+        РЕДАКТИРОВАНИЕ
+      </h1>
 
-        <h1 className="text-center text-lg font-black text-gray-900">
-          РЕДАКТИРОВАНИЕ
-        </h1>
+      <div className="flex flex-col items-center space-y-3">
+        <div className="relative w-28 h-28 rounded-3xl overflow-hidden shadow-md border-2 border-white bg-gray-200">
+          <img
+            src={profile.avatar_url || defaultAvatar}
+            alt={profile.name || "Аватар"}
+            className="w-full h-full object-cover"
+          />
 
-        {/* АВАТАР */}
-        <div className="flex flex-col items-center space-y-3">
-          <div className="relative w-28 h-28 rounded-3xl overflow-hidden shadow-md border-2 border-white bg-gray-200">
-            <img
-              src={profile.avatar_url || defaultAvatar}
-              alt={profile.name || "Аватар"}
-              className="w-full h-full object-cover"
-            />
-
-            {uploading && (
-              <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs font-bold">
-                ...
-              </div>
-            )}
-          </div>
-
-          <label className="cursor-pointer bg-white hover:bg-gray-50 text-gray-700 text-xs font-bold py-2 px-4 rounded-xl border border-gray-200 shadow-sm transition">
-            {uploading ? "Загружаем..." : "Изменить главное фото"}
-
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleAvatarUpload}
-              disabled={uploading}
-            />
-          </label>
+          {uploading && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs font-bold">
+              ...
+            </div>
+          )}
         </div>
 
-        {/* СООБЩЕНИЕ */}
-        {message && (
-          <div
-            className={`p-3 rounded-2xl text-xs font-semibold text-center ${
-              message.type === "success"
-                ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
-                : "bg-rose-50 text-rose-600 border border-rose-100"
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
+        <label className="cursor-pointer bg-white hover:bg-gray-50 text-gray-700 text-xs font-bold py-2 px-4 rounded-xl border border-gray-200 shadow-sm transition">
+          {uploading ? "Загружаем..." : "Изменить главное фото"}
 
-        {/* ДОПОЛНИТЕЛЬНЫЕ ФОТО */}
-        <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-gray-900">
-              Дополнительные фото ({photos.length}/5)
-            </h3>
-          </div>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarUpload}
+            disabled={uploading}
+          />
+        </label>
+      </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            {photos.map((photo) => (
-              <div
-                key={photo.id}
-                className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 group"
-              >
-                <img
-                  src={photo.url}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
+      {message && (
+        <div
+          className={
+            "p-3 rounded-2xl text-xs font-semibold text-center " +
+            (message.type === "success"
+              ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
+              : "bg-rose-50 text-rose-600 border border-rose-100")
+          }
+        >
+          {message.text}
+        </div>
+      )}
 
-                <button
-                  type="button"
-                  onClick={() => handleDeletePhoto(photo.id)}
-                  className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center transition cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-
-            {photos.length < 5 && (
-              <label className="aspect-square rounded-xl border-2 border-dashed border-gray-200 hover:border-pink-400 flex items-center justify-center cursor-pointer transition bg-gray-50/50">
-                <span className="text-2xl text-gray-300">
-                  {uploadingPhoto ? "..." : "+"}
-                </span>
-
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleGalleryPhotoUpload}
-                  disabled={uploadingPhoto}
-                />
-              </label>
-            )}
-          </div>
+      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-gray-900">
+            {"Дополнительные фото (" + photos.length + "/5)"}
+          </h3>
         </div>
 
-        {/* ФОРМА */}
-        <form
-          onSubmit={handleSave}
-          className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4"
-        >
-          {/* ИМЯ */}
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              Имя
-            </label>
-
-            <input
-              type="text"
-              value={profile.name}
-              onChange={(e) =>
-                setProfile({
-                  ...profile,
-                  name: e.target.value,
-                })
-              }
-              placeholder="Ваше имя"
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
-              required
-            />
-          </div>
-
-          {/* ВОЗРАСТ */}
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              Возраст
-            </label>
-
-            <input
-              type="number"
-              value={profile.age}
-              onChange={(e) =>
-                setProfile({
-                  ...profile,
-                  age: e.target.value,
-                })
-              }
-              placeholder="Сколько вам лет?"
-              min={18}
-              max={100}
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
-            />
-          </div>
-
-          {/* ГОРОД */}
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              Город
-            </label>
-
-            <input
-              type="text"
-              value={profile.city}
-              onChange={(e) =>
-                setProfile({
-                  ...profile,
-                  city: e.target.value,
-                })
-              }
-              placeholder="Ваш город"
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
-            />
-          </div>
-
-          {/* МЕСТОПОЛОЖЕНИЕ */}
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              Местоположение
-            </label>
-
-            <button
-              type="button"
-              onClick={handleDetectLocation}
-              disabled={locationStatus === "loading"}
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-100 transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+        <div className="grid grid-cols-3 gap-2">
+          {photos.map((photo) => (
+            <div
+              key={photo.id}
+              className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 group"
             >
-              📍{" "}
-              {locationStatus === "loading"
-                ? "Определяем..."
-                : locationStatus === "done"
-                ? "Местоположение обновлено ✓"
-                : "Определить моё местоположение"}
-            </button>
+              <img
+                src={photo.url}
+                alt=""
+                className="w-full h-full object-cover"
+              />
 
-            <p className="text-[10px] text-gray-400 mt-1">
-              Нужно, чтобы показывать расстояние до других людей
-            </p>
-          </div>
+              <button
+                type="button"
+                onClick={() => handleDeletePhoto(photo.id)}
+                className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center transition cursor-pointer"
+              >
+                x
+              </button>
+            </div>
+          ))}
 
-          {/* О СЕБЕ */}
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              О себе
+          {photos.length < 5 && (
+            <label className="aspect-square rounded-xl border-2 border-dashed border-gray-200 hover:border-pink-400 flex items-center justify-center cursor-pointer transition bg-gray-50/50">
+              <span className="text-2xl text-gray-300">
+                {uploadingPhoto ? "..." : "+"}
+              </span>
+
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleGalleryPhotoUpload}
+                disabled={uploadingPhoto}
+              />
             </label>
+          )}
+        </div>
+      </div>
 
-            <textarea
-              value={profile.bio}
-              onChange={(e) =>
-                setProfile({
-                  ...profile,
-                  bio: e.target.value,
-                })
-              }
-              placeholder="Расскажите о себе..."
-              rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition resize-none"
-            />
-          </div>
+      <form
+        onSubmit={handleSave}
+        className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4"
+      >
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Имя
+          </label>
 
-          {/* СОХРАНИТЬ */}
+          <input
+            type="text"
+            value={profile.name}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                name: e.target.value,
+              })
+            }
+            placeholder="Ваше имя"
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Возраст
+          </label>
+
+          <input
+            type="number"
+            value={profile.age}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                age: e.target.value,
+              })
+            }
+            placeholder="Сколько вам лет?"
+            min={18}
+            max={100}
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Город
+          </label>
+
+          <input
+            type="text"
+            value={profile.city}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                city: e.target.value,
+              })
+            }
+            placeholder="Ваш город"
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Местоположение
+          </label>
+
           <button
-            type="submit"
-            disabled={saving}
-            className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:opacity-95 text-white font-bold py-3 rounded-2xl text-xs shadow-lg transition cursor-pointer disabled:opacity-50"
+            type="button"
+            onClick={handleDetectLocation}
+            disabled={locationStatus === "loading"}
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {saving ? "Сохранение..." : "Сохранить профиль"}
+            {locationStatus === "loading"
+              ? "Определяем..."
+              : locationStatus === "done"
+              ? "Местоположение обновлено (готово)"
+              : "Определить моё местоположение"}
           </button>
-        </form>
-      </main>
-    </div>
+
+          <p className="text-[10px] text-gray-400 mt-1">
+            Нужно, чтобы показывать расстояние до других людей
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            О себе
+          </label>
+
+          <textarea
+            value={profile.bio}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                bio: e.target.value,
+              })
+            }
+            placeholder="Расскажите о себе..."
+            rows={3}
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition resize-none"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:opacity-95 text-white font-bold py-3 rounded-2xl text-xs shadow-lg transition cursor-pointer disabled:opacity-50"
+        >
+          {saving ? "Сохранение..." : "Сохранить профиль"}
+        </button>
+      </form>
+    </main>
   );
 }
-```
