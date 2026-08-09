@@ -8,7 +8,8 @@ export default function Sidebar() {
 
   const navItems = [
     { label: "Главная", href: "/", icon: "🏠" },
-    { label: "Мэтчи", href: "/matches", icon: "🔥" }, // 👈 Новая кнопка Мэтчи
+    { label: "Мэтчи", href: "/matches", icon: "🔥" },
+    { label: "Лайки", href: "/likes", icon: "💌" },
     { label: "Люди", href: "/people", icon: "👥" },
     { label: "Сообщения", href: "/messages", icon: "💬" },
     { label: "Мой профиль", href: "/profile", icon: "👤" },
