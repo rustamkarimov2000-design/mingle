@@ -40,8 +40,8 @@ export default function HomePage() {
   const [anonMessages, setAnonMessages] = useState<{ sender: "me" | "them"; text: string }[]>([]);
   const [inputAnonMessage, setInputAnonMessage] = useState("");
 
-  // Счётчик непрочитанных сообщений
   const [unreadCount, setUnreadCount] = useState(0);
+  const [likesCount, setLikesCount] = useState(0);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -77,7 +77,6 @@ export default function HomePage() {
     };
   }, []);
 
-  // Загрузка счётчика непрочитанных сообщений
   useEffect(() => {
     if (!userId) return;
 
@@ -128,7 +127,6 @@ export default function HomePage() {
 
     loadUnreadCount();
 
-    // Живое обновление счётчика при новых сообщениях
     const channel = supabase
       .channel("home_unread_messages")
       .on(
@@ -141,6 +139,39 @@ export default function HomePage() {
             conversationIds.includes(newMsg.conversation_id)
           ) {
             setUnreadCount((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadLikesCount = async () => {
+      const { count } = await supabase
+        .from("likes")
+        .select("id", { count: "exact", head: true })
+        .eq("to_user_id", userId);
+
+      setLikesCount(count || 0);
+    };
+
+    loadLikesCount();
+
+    const channel = supabase
+      .channel("home_incoming_likes")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "likes" },
+        (payload) => {
+          const newLike = payload.new as { to_user_id: string };
+          if (newLike.to_user_id === userId) {
+            setLikesCount((prev) => prev + 1);
           }
         }
       )
@@ -369,7 +400,15 @@ export default function HomePage() {
             <Link href="/discover" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
               🔥 Мэтчи
             </Link>
-            <Link href="/discover" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+            <Link href="/likes" className="flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+              <span className="flex items-center gap-3">💌 Лайки</span>
+              {likesCount > 0 && (
+                <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
+                  {likesCount > 9 ? "9+" : likesCount}
+                </span>
+              )}
+            </Link>
+            <Link href="/people" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
               👥 Люди
             </Link>
             <Link href="/messages" className="flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
@@ -640,7 +679,7 @@ export default function HomePage() {
             ) : (
               posts.map((post) => {
                 const isLiked = (post.post_likes || []).some((like) => like.user_id === userId);
-                const likesCount = post.post_likes?.length || 0;
+                const likesOnPost = post.post_likes?.length || 0;
 
                 return (
                   <div key={post.id} className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
@@ -673,7 +712,7 @@ export default function HomePage() {
                         }`}
                       >
                         <span className="text-sm">{isLiked ? "💖" : "🤍"}</span>
-                        <span>{likesCount}</span>
+                        <span>{likesOnPost}</span>
                       </button>
                       <button className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer">
                         💬 Комментировать
