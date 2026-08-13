@@ -10,6 +10,7 @@ interface Profile {
   name: string;
   avatar_url?: string;
   avatar?: string;
+  last_seen?: string;
 }
 
 interface MatchInfo {
@@ -42,6 +43,9 @@ export default function MessagesPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  // Стейты для онлайна
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const getAvatar = (p?: Profile) => {
@@ -57,7 +61,35 @@ export default function MessagesPage() {
     scrollToBottom();
   }, [messages]);
 
-  // Загружаем мэтчи вместе со счётчиком непрочитанных
+  // --- 1. ТРЕКИНГ ОНЛАЙН СТАТУСОВ (PRESENCE) ---
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const channel = supabase.channel("online-users");
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        const activeIds = Object.values(state)
+          .flat()
+          .map((p: any) => p.user_id);
+        setOnlineUserIds(activeIds);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({
+            user_id: currentUserId,
+            online_at: new Date().toISOString(),
+          });
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
+
+  // --- 2. ЗАГРУЗКА МЭТЧЕЙ С СООБЩЕНИЯМИ ---
   const loadMatchesWithCounts = async (currentId: string) => {
     const { data: matches1 } = await supabase
       .from("matches")
@@ -76,7 +108,7 @@ export default function MessagesPage() {
 
     if (matchRows.length === 0) {
       setMatches([]);
-      return;
+      return [];
     }
 
     const matchIds = matchRows.map((m) => m.matchId);
@@ -94,7 +126,6 @@ export default function MessagesPage() {
 
     const conversationIds = conversations?.map((c) => c.id) || [];
 
-    // Все непрочитанные сообщения (не от меня) во всех переписках сразу
     const { data: unreadMessages } = await supabase
       .from("messages")
       .select("conversation_id, sender_id, is_read")
@@ -128,7 +159,9 @@ export default function MessagesPage() {
   useEffect(() => {
     const init = async () => {
       setIsLoadingMatches(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       if (!user) {
         router.push("/auth/login");
@@ -149,7 +182,7 @@ export default function MessagesPage() {
     init();
   }, []);
 
-  // Отмечаем сообщения как прочитанные при выборе мэтча
+  // --- 3. ПОМЕЧАЕМ СООБЩЕНИЯ КАК ПРОЧИТАННЫЕ ---
   const markAsRead = async (conversationId: string, currentId: string) => {
     await supabase
       .from("messages")
@@ -158,11 +191,15 @@ export default function MessagesPage() {
       .eq("is_read", false)
       .neq("sender_id", currentId);
 
-    // Обнуляем счётчик локально, чтобы не ждать перезагрузки
+    // Обновляем локальные состояния
     setMatches((prev) =>
       prev.map((m) =>
         m.conversationId === conversationId ? { ...m, unreadCount: 0, isNew: false } : m
       )
+    );
+
+    setMessages((prev) =>
+      prev.map((m) => (m.sender_id !== currentId ? { ...m, is_read: true } : m))
     );
   };
 
@@ -173,6 +210,7 @@ export default function MessagesPage() {
     }
   };
 
+  // --- 4. ЗАГРУЗКА СООБЩЕНИЙ И REALTIME ДИАЛОГА ---
   useEffect(() => {
     if (!currentUserId || !selectedMatch) return;
 
@@ -196,7 +234,6 @@ export default function MessagesPage() {
 
       setIsLoadingMessages(false);
 
-      // На случай, если счётчик ещё не обнулился — отмечаем прочитанным при открытии
       if (selectedMatch.unreadCount > 0) {
         markAsRead(conversationId, currentUserId);
       }
@@ -204,6 +241,7 @@ export default function MessagesPage() {
 
     loadMessages();
 
+    // Слушаем INSERT (новые) и UPDATE (изменения статуса is_read)
     const channel = supabase
       .channel(`chat_${conversationId}`)
       .on(
@@ -216,15 +254,30 @@ export default function MessagesPage() {
         },
         (payload) => {
           const newMsg = payload.new as Message;
+
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
           });
 
-          // Если сообщение не от меня и переписка открыта — сразу помечаем прочитанным
           if (newMsg.sender_id !== currentUserId) {
             markAsRead(conversationId, currentUserId);
           }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const updatedMsg = payload.new as Message;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === updatedMsg.id ? updatedMsg : m))
+          );
         }
       )
       .subscribe();
@@ -234,6 +287,7 @@ export default function MessagesPage() {
     };
   }, [currentUserId, selectedMatch?.conversationId]);
 
+  // --- 5. ОТПРАВКА СООБЩЕНИЯ ---
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     setSendError(null);
@@ -272,7 +326,6 @@ export default function MessagesPage() {
     } else if (data) {
       setMessages((prev) => prev.map((m) => (m.id === tempId ? data : m)));
 
-      // После отправки — этот мэтч больше не "новый"
       setMatches((prev) =>
         prev.map((m) =>
           m.conversationId === selectedMatch.conversationId ? { ...m, isNew: false } : m
@@ -280,6 +333,22 @@ export default function MessagesPage() {
       );
     }
   };
+
+  // Вспомогательная функция для текста времени активности
+  const formatLastSeen = (dateString?: string) => {
+    if (!dateString) return "Был(а) недавно";
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / 60000);
+
+    if (diffMinutes < 5) return "Был(а) только что";
+    if (diffMinutes < 60) return `Был(а) ${diffMinutes} мин. назад`;
+    return `Был(а) в ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const isSelectedUserOnline = selectedMatch
+    ? onlineUserIds.includes(selectedMatch.profile.id)
+    : false;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 flex flex-col items-center justify-between pb-4 select-none">
@@ -302,11 +371,15 @@ export default function MessagesPage() {
           {isLoadingMatches ? (
             <div className="text-xs text-gray-400 animate-pulse">Загрузка мэтчей...</div>
           ) : matches.length === 0 ? (
-            <p className="text-xs text-gray-400 italic">Пока нет мэтчей. Перейдите в /discover и свайпните вправо!</p>
+            <p className="text-xs text-gray-400 italic">
+              Пока нет мэтчей. Перейдите в /discover и свайпните вправо!
+            </p>
           ) : (
             <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
               {matches.map((match) => {
                 const isSelected = selectedMatch?.matchId === match.matchId;
+                const isOnline = onlineUserIds.includes(match.profile.id);
+
                 return (
                   <button
                     key={match.matchId}
@@ -328,6 +401,11 @@ export default function MessagesPage() {
                         />
                       </div>
 
+                      {/* Индикатор Онлайн в списке мэтчей */}
+                      {isOnline && (
+                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />
+                      )}
+
                       {/* Бейджик непрочитанных */}
                       {match.unreadCount > 0 && (
                         <span className="absolute -top-1 -right-1 bg-pink-600 text-white text-[9px] font-black min-w-[16px] h-[16px] px-1 rounded-full flex items-center justify-center border-2 border-white">
@@ -335,7 +413,7 @@ export default function MessagesPage() {
                         </span>
                       )}
 
-                      {/* Пометка "новый" мэтч без переписки */}
+                      {/* Пометка "новый" мэтч */}
                       {match.isNew && match.unreadCount === 0 && (
                         <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white" />
                       )}
@@ -348,10 +426,6 @@ export default function MessagesPage() {
                     >
                       {match.profile.name || "Анкета"}
                     </span>
-
-                    {match.isNew && match.unreadCount === 0 && (
-                      <span className="text-[9px] text-emerald-600 font-bold">Новый</span>
-                    )}
                   </button>
                 );
               })}
@@ -365,18 +439,36 @@ export default function MessagesPage() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col justify-between overflow-hidden">
+            {/* Шапка чата с динамическим статусом */}
             <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white">
-              <img
-                src={getAvatar(selectedMatch.profile)}
-                alt={selectedMatch.profile.name}
-                className="w-9 h-9 object-cover rounded-full"
-              />
+              <div className="relative">
+                <img
+                  src={getAvatar(selectedMatch.profile)}
+                  alt={selectedMatch.profile.name}
+                  className="w-9 h-9 object-cover rounded-full"
+                />
+                <span
+                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                    isSelectedUserOnline ? "bg-green-500" : "bg-gray-300"
+                  }`}
+                />
+              </div>
+
               <div>
                 <h4 className="text-xs font-bold text-gray-900">{selectedMatch.profile.name}</h4>
-                <span className="text-[10px] text-emerald-500 font-medium">● В сети</span>
+                <span
+                  className={`text-[10px] font-medium ${
+                    isSelectedUserOnline ? "text-green-500" : "text-gray-400"
+                  }`}
+                >
+                  {isSelectedUserOnline
+                    ? "● В сети"
+                    : formatLastSeen(selectedMatch.profile.last_seen)}
+                </span>
               </div>
             </div>
 
+            {/* Сообщения */}
             <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#F8F9FA]/50">
               {sendError && (
                 <div className="bg-rose-50 border border-rose-200 text-rose-600 text-[11px] p-2 rounded-xl text-center">
@@ -409,12 +501,30 @@ export default function MessagesPage() {
                       >
                         {msg.content}
                       </div>
-                      <span className="text-[9px] text-gray-400 mt-1 px-1">
-                        {new Date(msg.created_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
+
+                      {/* Время + Галочки прочтения */}
+                      <div className="flex items-center gap-1 text-[9px] text-gray-400 mt-1 px-1">
+                        <span>
+                          {new Date(msg.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+
+                        {isMe && (
+                          <span className="font-bold text-[10px]">
+                            {msg.is_read ? (
+                              <span className="text-pink-500" title="Прочитано">
+                                ✓✓
+                              </span>
+                            ) : (
+                              <span className="text-gray-300" title="Отправлено">
+                                ✓
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 })
@@ -422,7 +532,11 @@ export default function MessagesPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            <form onSubmit={handleSendMessage} className="p-3 border-t border-gray-100 bg-white flex items-center gap-2">
+            {/* Форма отправки */}
+            <form
+              onSubmit={handleSendMessage}
+              className="p-3 border-t border-gray-100 bg-white flex items-center gap-2"
+            >
               <input
                 type="text"
                 value={newMessage}
