@@ -76,6 +76,7 @@ export default function DiscoverPage() {
     const myLat = myProfile?.latitude;
     const myLon = myProfile?.longitude;
 
+    // Загружаем ID всех, кого мы уже лайкнули
     const { data: alreadyLiked } = await supabase
       .from("likes")
       .select("to_user_id")
@@ -167,6 +168,7 @@ export default function DiscoverPage() {
 
   const nextCandidate = () => {
     x.set(0);
+    setPhotoIndex(0);
     setCurrentIndex((prev) => prev + 1);
   };
 
@@ -188,6 +190,15 @@ export default function DiscoverPage() {
       return;
     }
 
+    // 1. Проверяем, лайкал ли нас этот кандидат РАНЕЕ (встречный лайк)
+    const { data: reciprocalLike } = await supabase
+      .from("likes")
+      .select("id")
+      .eq("from_user_id", currentCandidate.id)
+      .eq("to_user_id", user.id)
+      .maybeSingle();
+
+    // 2. Отправляем наш лайк
     const { error: likeError } = await supabase.from("likes").insert({
       from_user_id: user.id,
       to_user_id: currentCandidate.id,
@@ -199,15 +210,12 @@ export default function DiscoverPage() {
       return;
     }
 
-    const { data: matchData } = await supabase
-      .from("matches")
-      .select("id")
-      .or(
-        `and(user1_id.eq.${user.id},user2_id.eq.${currentCandidate.id}),and(user1_id.eq.${currentCandidate.id},user2_id.eq.${user.id})`
-      )
-      .maybeSingle();
+    // 3. Если был встречный лайк, создаем запись в matches (если базы нет автоматических триггеров)
+    if (reciprocalLike) {
+      await supabase.from("matches").insert([
+        { user1_id: user.id, user2_id: currentCandidate.id }
+      ]).select().maybeSingle();
 
-    if (matchData) {
       triggerConfetti();
       setMatchedUser(currentCandidate);
       setShowMatchModal(true);
@@ -245,7 +253,6 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12 overflow-x-hidden">
-
       <header className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-xl font-black tracking-wider text-gray-900">
@@ -254,16 +261,23 @@ export default function DiscoverPage() {
           <span className="text-xs text-gray-400 font-medium">/ мэтчи и поиск</span>
         </div>
 
-        <Link
-          href="/"
-          className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 px-4 py-2 rounded-full shadow-xs"
-        >
-          ← На главную
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/messages"
+            className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 px-4 py-2 rounded-full shadow-xs"
+          >
+            Сообщения 💬
+          </Link>
+          <Link
+            href="/profile"
+            className="text-xs font-bold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 px-4 py-2 rounded-full shadow-xs"
+          >
+            Профиль
+          </Link>
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 pt-4 space-y-6">
-
         <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-black uppercase tracking-wider text-gray-900 flex items-center gap-2">
@@ -274,6 +288,7 @@ export default function DiscoverPage() {
                 setSelectedCity("Все");
                 setSelectedInterest("Все");
                 setCurrentIndex(0);
+                setPhotoIndex(0);
               }}
               className="text-[11px] font-bold text-pink-600 hover:underline cursor-pointer"
             >
@@ -291,6 +306,7 @@ export default function DiscoverPage() {
                     onClick={() => {
                       setSelectedCity(city);
                       setCurrentIndex(0);
+                      setPhotoIndex(0);
                     }}
                     className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
                       selectedCity === city
@@ -313,6 +329,7 @@ export default function DiscoverPage() {
                     onClick={() => {
                       setSelectedInterest(tag);
                       setCurrentIndex(0);
+                      setPhotoIndex(0);
                     }}
                     className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
                       selectedInterest === tag
@@ -446,6 +463,7 @@ export default function DiscoverPage() {
                     setSelectedCity("Все");
                     setSelectedInterest("Все");
                     setCurrentIndex(0);
+                    setPhotoIndex(0);
                   }}
                   className="bg-[#E02868] text-white text-xs font-bold px-6 py-3 rounded-2xl shadow-md hover:bg-pink-600 transition cursor-pointer"
                 >

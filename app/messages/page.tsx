@@ -42,8 +42,6 @@ export default function MessagesPage() {
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-
-  // Стейты для онлайна
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -61,7 +59,6 @@ export default function MessagesPage() {
     scrollToBottom();
   }, [messages]);
 
-  // --- 1. ТРЕКИНГ ОНЛАЙН СТАТУСОВ (PRESENCE) ---
   useEffect(() => {
     if (!currentUserId) return;
 
@@ -89,7 +86,6 @@ export default function MessagesPage() {
     };
   }, [currentUserId]);
 
-  // --- 2. ЗАГРУЗКА МЭТЧЕЙ С СООБЩЕНИЯМИ ---
   const loadMatchesWithCounts = async (currentId: string) => {
     const { data: matches1 } = await supabase
       .from("matches")
@@ -169,7 +165,6 @@ export default function MessagesPage() {
       }
 
       setCurrentUserId(user.id);
-
       const combined = await loadMatchesWithCounts(user.id);
 
       if (combined && combined.length > 0) {
@@ -182,7 +177,6 @@ export default function MessagesPage() {
     init();
   }, []);
 
-  // --- 3. ПОМЕЧАЕМ СООБЩЕНИЯ КАК ПРОЧИТАННЫЕ ---
   const markAsRead = async (conversationId: string, currentId: string) => {
     await supabase
       .from("messages")
@@ -191,7 +185,6 @@ export default function MessagesPage() {
       .eq("is_read", false)
       .neq("sender_id", currentId);
 
-    // Обновляем локальные состояния
     setMatches((prev) =>
       prev.map((m) =>
         m.conversationId === conversationId ? { ...m, unreadCount: 0, isNew: false } : m
@@ -210,7 +203,6 @@ export default function MessagesPage() {
     }
   };
 
-  // --- 4. ЗАГРУЗКА СООБЩЕНИЙ И REALTIME ДИАЛОГА ---
   useEffect(() => {
     if (!currentUserId || !selectedMatch) return;
 
@@ -241,7 +233,6 @@ export default function MessagesPage() {
 
     loadMessages();
 
-    // Слушаем INSERT (новые) и UPDATE (изменения статуса is_read)
     const channel = supabase
       .channel(`chat_${conversationId}`)
       .on(
@@ -254,7 +245,6 @@ export default function MessagesPage() {
         },
         (payload) => {
           const newMsg = payload.new as Message;
-
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];
@@ -287,7 +277,6 @@ export default function MessagesPage() {
     };
   }, [currentUserId, selectedMatch?.conversationId]);
 
-  // --- 5. ОТПРАВКА СООБЩЕНИЯ ---
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     setSendError(null);
@@ -334,7 +323,6 @@ export default function MessagesPage() {
     }
   };
 
-  // Вспомогательная функция для текста времени активности
   const formatLastSeen = (dateString?: string) => {
     if (!dateString) return "Был(а) недавно";
     const date = new Date(dateString);
@@ -351,8 +339,8 @@ export default function MessagesPage() {
     : false;
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-gray-800 flex flex-col items-center justify-between pb-4 select-none">
-      <header className="w-full max-w-md px-6 h-16 flex items-center justify-between border-b border-gray-100 bg-white">
+    <div className="min-h-screen bg-[#F8F9FA] text-gray-800 flex flex-col justify-between pb-4 select-none">
+      <header className="w-full px-6 h-16 flex items-center justify-between border-b border-gray-100 bg-white shadow-sm">
         <Link href="/discover" className="text-xs font-bold text-gray-500 hover:text-gray-900 transition">
           ← К анкетам
         </Link>
@@ -362,7 +350,7 @@ export default function MessagesPage() {
         </Link>
       </header>
 
-      <main className="w-full max-w-md flex-1 flex flex-col bg-white overflow-hidden shadow-sm">
+      <main className="w-full max-w-6xl mx-auto flex-1 flex flex-col bg-white overflow-hidden my-4 rounded-2xl border border-gray-100 shadow-sm">
         <div className="p-4 border-b border-gray-100 bg-gray-50/50">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
             Взаимные мэтчи ({matches.length})
@@ -401,19 +389,16 @@ export default function MessagesPage() {
                         />
                       </div>
 
-                      {/* Индикатор Онлайн в списке мэтчей */}
                       {isOnline && (
                         <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />
                       )}
 
-                      {/* Бейджик непрочитанных */}
                       {match.unreadCount > 0 && (
                         <span className="absolute -top-1 -right-1 bg-pink-600 text-white text-[9px] font-black min-w-[16px] h-[16px] px-1 rounded-full flex items-center justify-center border-2 border-white">
                           {match.unreadCount > 9 ? "9+" : match.unreadCount}
                         </span>
                       )}
 
-                      {/* Пометка "новый" мэтч */}
                       {match.isNew && match.unreadCount === 0 && (
                         <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white" />
                       )}
@@ -434,30 +419,29 @@ export default function MessagesPage() {
         </div>
 
         {!selectedMatch ? (
-          <div className="flex-1 flex items-center justify-center p-6 text-center text-xs text-gray-400">
+          <div className="flex-1 flex items-center justify-center p-6 text-center text-xs text-gray-400 min-h-[300px]">
             Выберите мэтч сверху, чтобы открыть чат
           </div>
         ) : (
-          <div className="flex-1 flex flex-col justify-between overflow-hidden">
-            {/* Шапка чата с динамическим статусом */}
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white">
+          <div className="flex-1 flex flex-col justify-between overflow-hidden min-h-[400px]">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3 bg-white">
               <div className="relative">
                 <img
                   src={getAvatar(selectedMatch.profile)}
                   alt={selectedMatch.profile.name}
-                  className="w-9 h-9 object-cover rounded-full"
+                  className="w-10 h-10 object-cover rounded-full"
                 />
                 <span
-                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                  className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
                     isSelectedUserOnline ? "bg-green-500" : "bg-gray-300"
                   }`}
                 />
               </div>
 
               <div>
-                <h4 className="text-xs font-bold text-gray-900">{selectedMatch.profile.name}</h4>
+                <h4 className="text-sm font-bold text-gray-900">{selectedMatch.profile.name}</h4>
                 <span
-                  className={`text-[10px] font-medium ${
+                  className={`text-xs font-medium ${
                     isSelectedUserOnline ? "text-green-500" : "text-gray-400"
                   }`}
                 >
@@ -468,10 +452,9 @@ export default function MessagesPage() {
               </div>
             </div>
 
-            {/* Сообщения */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#F8F9FA]/50">
+            <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-[#F8F9FA]/50">
               {sendError && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-600 text-[11px] p-2 rounded-xl text-center">
+                <div className="bg-rose-50 border border-rose-200 text-rose-600 text-xs p-3 rounded-xl text-center">
                   {sendError}
                 </div>
               )}
@@ -481,7 +464,7 @@ export default function MessagesPage() {
                   Загружаем историю сообщений...
                 </div>
               ) : messages.length === 0 ? (
-                <div className="text-center text-xs text-gray-400 py-8">
+                <div className="text-center text-xs text-gray-400 py-12">
                   Начните диалог первым 👋
                 </div>
               ) : (
@@ -493,7 +476,7 @@ export default function MessagesPage() {
                       className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
                     >
                       <div
-                        className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed ${
+                        className={`max-w-[65%] px-4 py-3 rounded-2xl text-xs leading-relaxed ${
                           isMe
                             ? "bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-br-none shadow-sm"
                             : "bg-white border border-gray-100 text-gray-800 rounded-bl-none shadow-sm"
@@ -502,8 +485,7 @@ export default function MessagesPage() {
                         {msg.content}
                       </div>
 
-                      {/* Время + Галочки прочтения */}
-                      <div className="flex items-center gap-1 text-[9px] text-gray-400 mt-1 px-1">
+                      <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-1 px-1">
                         <span>
                           {new Date(msg.created_at).toLocaleTimeString([], {
                             hour: "2-digit",
@@ -512,7 +494,7 @@ export default function MessagesPage() {
                         </span>
 
                         {isMe && (
-                          <span className="font-bold text-[10px]">
+                          <span className="font-bold text-[11px]">
                             {msg.is_read ? (
                               <span className="text-pink-500" title="Прочитано">
                                 ✓✓
@@ -532,22 +514,21 @@ export default function MessagesPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Форма отправки */}
             <form
               onSubmit={handleSendMessage}
-              className="p-3 border-t border-gray-100 bg-white flex items-center gap-2"
+              className="p-4 border-t border-gray-100 bg-white flex items-center gap-3"
             >
               <input
                 type="text"
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder={`Сообщение для ${selectedMatch.profile.name}...`}
-                className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl px-5 py-3 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
               />
               <button
                 type="submit"
                 disabled={!newMessage.trim()}
-                className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white font-bold px-4 py-2.5 rounded-2xl text-xs transition cursor-pointer"
+                className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white font-bold px-6 py-3 rounded-2xl text-xs transition cursor-pointer"
               >
                 Отправить
               </button>
