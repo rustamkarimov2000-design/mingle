@@ -13,6 +13,7 @@ interface Comment {
   content: string;
   created_at: string;
   authorName: string;
+  parent_comment_id: string | null;
 }
 
 interface Post {
@@ -42,6 +43,13 @@ interface StoryGroup {
   stories: StoryItem[];
 }
 
+interface RepostTarget {
+  matchId: string;
+  conversationId: string;
+  name: string;
+  avatar: string;
+}
+
 const STORY_DURATION_MS = 5000;
 
 export default function HomePage() {
@@ -61,21 +69,23 @@ export default function HomePage() {
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [isAnonChatOpen, setIsAnonChatOpen] = useState(false);
-  const [anonStatus, setAnonStatus] = useState<"idle" | "searching" | "chatting">("idle");
-  const [anonMessages, setAnonMessages] = useState<{ sender: "me" | "them"; text: string }[]>([]);
-  const [inputAnonMessage, setInputAnonMessage] = useState("");
-
   const [unreadCount, setUnreadCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
 
-  // Комментарии
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [submittingComment, setSubmittingComment] = useState<Set<string>>(new Set());
+  const [replyingTo, setReplyingTo] = useState<Record<string, string | null>>({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [submittingReply, setSubmittingReply] = useState<Set<string>>(new Set());
 
-  // Истории
+  const [repostPostId, setRepostPostId] = useState<string | null>(null);
+  const [repostTargets, setRepostTargets] = useState<RepostTarget[]>([]);
+  const [isLoadingRepostTargets, setIsLoadingRepostTargets] = useState(false);
+  const [sendingRepostTo, setSendingRepostTo] = useState<string | null>(null);
+  const [repostSentTo, setRepostSentTo] = useState<Set<string>>(new Set());
+
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
   const [isUploadingStory, setIsUploadingStory] = useState(false);
   const storyFileInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +234,6 @@ export default function HomePage() {
     };
   }, [userId]);
 
-  // Загрузка историй
   const loadStories = useCallback(async () => {
     const { data: storiesData, error } = await supabase
       .from("stories")
@@ -458,7 +467,7 @@ export default function HomePage() {
         supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
         supabase
           .from("post_comments")
-          .select("id, post_id, user_id, content, created_at")
+          .select("id, post_id, user_id, content, created_at, parent_comment_id")
           .in("post_id", postIds)
           .order("created_at", { ascending: true }),
       ]);
@@ -610,6 +619,7 @@ export default function HomePage() {
         post_id: postId,
         user_id: userId,
         content: text,
+        parent_comment_id: null,
       })
       .select()
       .single();
@@ -638,6 +648,154 @@ export default function HomePage() {
     });
   };
 
+  const startReply = (commentId: string) => {
+    setReplyingTo((prev) => ({ ...prev, [commentId]: commentId }));
+  };
+
+  const cancelReply = (commentId: string) => {
+    setReplyingTo((prev) => ({ ...prev, [commentId]: null }));
+    setReplyDrafts((prev) => ({ ...prev, [commentId]: "" }));
+  };
+
+  const handleReplyDraftChange = (commentId: string, value: string) => {
+    setReplyDrafts((prev) => ({ ...prev, [commentId]: value }));
+  };
+
+  const handleAddReply = async (postId: string, parentCommentId: string) => {
+    if (!userId) {
+      router.push("/auth/login");
+      return;
+    }
+
+    const text = (replyDrafts[parentCommentId] || "").trim();
+    if (!text) return;
+
+    setSubmittingReply((prev) => new Set(prev).add(parentCommentId));
+
+    const { data, error } = await supabase
+      .from("post_comments")
+      .insert({
+        post_id: postId,
+        user_id: userId,
+        content: text,
+        parent_comment_id: parentCommentId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Ошибка добавления ответа:", error);
+      alert("Не удалось добавить ответ: " + error.message);
+    } else if (data) {
+      const newReply: Comment = {
+        ...data,
+        authorName: displayName,
+      };
+
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: [...(prev[postId] || []), newReply],
+      }));
+
+      setReplyDrafts((prev) => ({ ...prev, [parentCommentId]: "" }));
+      setReplyingTo((prev) => ({ ...prev, [parentCommentId]: null }));
+    }
+
+    setSubmittingReply((prev) => {
+      const next = new Set(prev);
+      next.delete(parentCommentId);
+      return next;
+    });
+  };
+
+  const openRepostModal = async (postId: string) => {
+    setRepostPostId(postId);
+    setRepostSentTo(new Set());
+
+    if (repostTargets.length > 0 || !userId) return;
+
+    setIsLoadingRepostTargets(true);
+
+    const [matches1Res, matches2Res] = await Promise.all([
+      supabase.from("matches").select("id, user2_id").eq("user1_id", userId),
+      supabase.from("matches").select("id, user1_id").eq("user2_id", userId),
+    ]);
+
+    const matchRows = [
+      ...(matches1Res.data || []).map((m) => ({ matchId: m.id, otherUserId: m.user2_id })),
+      ...(matches2Res.data || []).map((m) => ({ matchId: m.id, otherUserId: m.user1_id })),
+    ];
+
+    if (matchRows.length === 0) {
+      setRepostTargets([]);
+      setIsLoadingRepostTargets(false);
+      return;
+    }
+
+    const matchIds = matchRows.map((m) => m.matchId);
+    const otherUserIds = matchRows.map((m) => m.otherUserId);
+
+    const [conversationsRes, profilesRes] = await Promise.all([
+      supabase.from("conversations").select("id, match_id").in("match_id", matchIds),
+      supabase.from("profiles").select("id, name, avatar_url, avatar").in("id", otherUserIds),
+    ]);
+
+    const targets: RepostTarget[] = matchRows
+      .map((row) => {
+        const conversation = conversationsRes.data?.find((c) => c.match_id === row.matchId);
+        const profile = profilesRes.data?.find((p) => p.id === row.otherUserId);
+
+        if (!conversation || !profile) return null;
+
+        return {
+          matchId: row.matchId,
+          conversationId: conversation.id,
+          name: profile.name || "Пользователь",
+          avatar:
+            profile.avatar_url ||
+            profile.avatar ||
+            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+        } as RepostTarget;
+      })
+      .filter(Boolean) as RepostTarget[];
+
+    setRepostTargets(targets);
+    setIsLoadingRepostTargets(false);
+  };
+
+  const closeRepostModal = () => {
+    setRepostPostId(null);
+  };
+
+  const handleSendRepost = async (target: RepostTarget) => {
+    if (!userId || !repostPostId) return;
+
+    const post = posts.find((p) => p.id === repostPostId);
+    if (!post) return;
+
+    setSendingRepostTo(target.matchId);
+
+    const excerpt = post.content.length > 120 ? post.content.slice(0, 120) + "..." : post.content;
+    const authorName = post.profiles?.name || "Пользователь";
+    const messageContent =
+      "📤 Поделился(-ась) постом от " + authorName + ":\n\"" + excerpt + "\"";
+
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: target.conversationId,
+      sender_id: userId,
+      content: messageContent,
+    });
+
+    if (error) {
+      console.error("Ошибка репоста:", error);
+      alert("Не удалось отправить: " + error.message);
+    } else {
+      setRepostSentTo((prev) => new Set(prev).add(target.matchId));
+    }
+
+    setSendingRepostTo(null);
+  };
+
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
     if (!error) {
@@ -646,41 +804,15 @@ export default function HomePage() {
     }
   };
 
-  const handleToggleAnonChat = () => {
-    if (!isAnonChatOpen) {
-      setIsAnonChatOpen(true);
-      startAnonSearch();
-    } else {
-      setIsAnonChatOpen(false);
-      setAnonStatus("idle");
-    }
-  };
-
-  const startAnonSearch = () => {
-    setAnonStatus("searching");
-    setAnonMessages([]);
-    setTimeout(() => {
-      setAnonStatus("chatting");
-      setAnonMessages([
-        { sender: "them", text: "Привет! С кем общаюсь? Назови 3 свои любимые песни 😉" },
-      ]);
-    }, 2500);
-  };
-
-  const sendAnonMessage = () => {
-    if (!inputAnonMessage.trim()) return;
-    setAnonMessages((prev) => [...prev, { sender: "me", text: inputAnonMessage }]);
-    setInputAnonMessage("");
-  };
-
   if (!isLoaded) return null;
 
   const activeGroup = viewerGroupIndex !== null ? storyGroups[viewerGroupIndex] : null;
   const activeStory = activeGroup ? activeGroup.stories[viewerStoryIndex] : null;
+  const repostPost = repostPostId ? posts.find((p) => p.id === repostPostId) : null;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12">
-      <header className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <header className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
          <span className="font-logo text-xl text-gray-900">mingle</span>
           <span className="text-xs text-gray-400 font-medium">здесь общаются</span>
@@ -713,14 +845,18 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 pt-4 grid grid-cols-12 gap-6">
+      <main className="max-w-7xl mx-auto px-6 pt-4 grid grid-cols-12 gap-6">
+        {/* ЛЕВОЕ МЕНЮ */}
         <aside className="col-span-12 md:col-span-3 space-y-2">
           <div className="bg-white rounded-3xl p-3 shadow-xs border border-gray-100 space-y-1 sticky top-4">
             <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gray-100 font-bold text-xs text-gray-900">
               🏠 Главная
             </Link>
             <Link href="/discover" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
-              🔥 Мэтчи
+              🔥 Смотреть людей
+            </Link>
+            <Link href="/matches" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+              💫 Мэтчи
             </Link>
             <Link href="/likes" className="flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
               <span className="flex items-center gap-3">💌 Лайки</span>
@@ -747,151 +883,11 @@ export default function HomePage() {
           </div>
         </aside>
 
-        <section className="col-span-12 md:col-span-9 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-[#EFA1A4] rounded-3xl p-5 text-white flex flex-col justify-between h-40 shadow-xs">
-              <span className="text-[10px] uppercase tracking-wider font-extrabold opacity-90">
-                👋 ЗДРАВСТВУЙТЕ
-              </span>
-              <div>
-                <h2 className="text-xl font-black uppercase tracking-tight flex items-center gap-1 truncate">
-                  {displayName.toUpperCase()} 👋
-                </h2>
-                <p className="text-[11px] leading-snug mt-1 opacity-90">
-                  Сегодня отличный день для знакомств.
-                </p>
-              </div>
-            </div>
-
-            <Link
-              href="/discover"
-              className="bg-[#93B497] rounded-3xl p-5 text-white flex flex-col justify-center items-center text-center h-40 shadow-xs hover:opacity-95 transition cursor-pointer"
-            >
-              <span className="text-2xl mb-1">🔥</span>
-              <h3 className="text-base font-black">Смотреть людей</h3>
-              <p className="text-[11px] opacity-90 mt-1">Начни свайпать</p>
-            </Link>
-
-            <div className="bg-[#B3A1C9] rounded-3xl p-5 text-white flex flex-col justify-between h-40 shadow-xs relative">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-xs font-black flex items-center gap-1">🤖 AI Помощник</h3>
-                  <span className="bg-white/30 text-[9px] font-bold px-2 py-0.5 rounded-full">Онлайн</span>
-                </div>
-                <p className="text-[10px] leading-tight opacity-90">
-                  Помогу оформить профиль и подберу первое сообщение.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setIsAIModalOpen(true)}
-                className="w-full bg-white/30 hover:bg-white/40 text-white font-bold py-2 rounded-xl text-xs backdrop-blur-md transition cursor-pointer text-center"
-              >
-                Открыть AI
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-4 sm:p-5 text-white shadow-md border border-slate-800 transition-all duration-300">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-lg shadow-inner shrink-0">
-                  🎭
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-black tracking-wider uppercase">Анонимные Чаты</h3>
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      142 онлайн
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 leading-snug">
-                    Случайный собеседник без фото и анкеты. Полная тайна!
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={handleToggleAnonChat}
-                className={`w-full sm:w-auto font-bold px-5 py-2.5 rounded-2xl text-xs transition cursor-pointer text-center whitespace-nowrap shrink-0 ${
-                  isAnonChatOpen
-                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30"
-                    : "bg-white/10 hover:bg-white/20 border border-white/15 text-white"
-                }`}
-              >
-                {isAnonChatOpen ? "Закрыть чат ✕" : "Войти в чат 🚀"}
-              </button>
-            </div>
-
-            {isAnonChatOpen && (
-              <div className="mt-4 pt-4 border-t border-slate-800/80">
-                {anonStatus === "searching" && (
-                  <div className="py-8 flex flex-col items-center justify-center space-y-3">
-                    <div className="relative w-10 h-10 flex items-center justify-center">
-                      <div className="absolute inset-0 rounded-full border-2 border-pink-500 animate-ping opacity-75" />
-                      <div className="w-8 h-8 rounded-full bg-purple-600/50 flex items-center justify-center text-base">
-                        🔍
-                      </div>
-                    </div>
-                    <span className="text-xs font-bold text-slate-300">Ищем анонимного собеседника...</span>
-                  </div>
-                )}
-
-                {anonStatus === "chatting" && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between bg-slate-800/60 rounded-2xl px-4 py-2 text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                        <span className="font-bold text-slate-200">Собеседник найден (#8492)</span>
-                      </div>
-                      <button
-                        onClick={startAnonSearch}
-                        className="text-pink-400 hover:text-pink-300 font-bold transition cursor-pointer"
-                      >
-                        Следующий 🔄
-                      </button>
-                    </div>
-
-                    <div className="h-44 overflow-y-auto space-y-2 pr-2 bg-slate-950/40 p-3 rounded-2xl border border-slate-800/50">
-                      {anonMessages.map((msg, i) => (
-                        <div
-                          key={i}
-                          className={`flex ${msg.sender === "me" ? "justify-end" : "justify-start"}`}
-                        >
-                          <div
-                            className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-xs ${
-                              msg.sender === "me"
-                                ? "bg-pink-600 text-white rounded-br-none"
-                                : "bg-slate-800 text-slate-100 rounded-bl-none border border-slate-700/50"
-                            }`}
-                          >
-                            {msg.text}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={inputAnonMessage}
-                        onChange={(e) => setInputAnonMessage(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && sendAnonMessage()}
-                        placeholder="Напишите анонимное сообщение..."
-                        className="flex-1 bg-slate-800/80 border border-slate-700/60 rounded-2xl px-4 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-pink-500"
-                      />
-                      <button
-                        onClick={sendAnonMessage}
-                        className="bg-pink-600 hover:bg-pink-500 text-white font-bold px-4 py-2 rounded-2xl text-xs transition cursor-pointer"
-                      >
-                        Отправить
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+        {/* ЦЕНТРАЛЬНАЯ ЛЕНТА */}
+        <section className="col-span-12 md:col-span-6 space-y-6">
+          <div className="flex items-baseline gap-1.5 px-1">
+            <span className="text-xs text-gray-400">👋 Здравствуйте,</span>
+            <span className="text-xs font-black text-gray-900">{displayName}</span>
           </div>
 
           {/* ИСТОРИИ */}
@@ -1033,9 +1029,13 @@ export default function HomePage() {
               posts.map((post) => {
                 const isLiked = (post.post_likes || []).some((like) => like.user_id === userId);
                 const likesOnPost = post.post_likes?.length || 0;
-                const postComments = commentsByPost[post.id] || [];
+                const allPostComments = commentsByPost[post.id] || [];
+                const topLevelComments = allPostComments.filter((c) => !c.parent_comment_id);
                 const isCommentsOpen = openComments.has(post.id);
                 const isCommentSubmitting = submittingComment.has(post.id);
+
+                const getReplies = (commentId: string) =>
+                  allPostComments.filter((c) => c.parent_comment_id === commentId);
 
                 return (
                   <div key={post.id} className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
@@ -1075,41 +1075,120 @@ export default function HomePage() {
                         className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer"
                       >
                         💬 {isCommentsOpen ? "Скрыть" : "Комментировать"}
-                        {postComments.length > 0 && " (" + postComments.length + ")"}
+                        {allPostComments.length > 0 && " (" + allPostComments.length + ")"}
+                      </button>
+                      <button
+                        onClick={() => openRepostModal(post.id)}
+                        className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer"
+                      >
+                        📤 Отправить в ЛС
                       </button>
                     </div>
 
                     {isCommentsOpen && (
                       <div className="pt-3 border-t border-gray-50 space-y-3">
-                        {postComments.length === 0 ? (
+                        {topLevelComments.length === 0 ? (
                           <p className="text-[11px] text-gray-400 italic">
                             Пока нет комментариев. Будьте первым!
                           </p>
                         ) : (
-                          <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                            {postComments.map((comment) => (
-                              <div key={comment.id} className="flex items-start gap-2.5">
-                                <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
-                                  {comment.authorName.slice(0, 2)}
-                                </div>
-                                <div className="bg-gray-50 rounded-2xl px-3 py-2 flex-1">
-                                  <div className="flex items-baseline gap-2">
-                                    <span className="text-[11px] font-bold text-gray-900">
-                                      {comment.authorName}
-                                    </span>
-                                    <span className="text-[9px] text-gray-400">
-                                      {new Date(comment.created_at).toLocaleTimeString([], {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })}
-                                    </span>
+                          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                            {topLevelComments.map((comment) => {
+                              const replies = getReplies(comment.id);
+                              const isReplying = replyingTo[comment.id];
+                              const isReplySubmitting = submittingReply.has(comment.id);
+
+                              return (
+                                <div key={comment.id} className="space-y-2">
+                                  <div className="flex items-start gap-2.5">
+                                    <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
+                                      {comment.authorName.slice(0, 2)}
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="bg-gray-50 rounded-2xl px-3 py-2">
+                                        <div className="flex items-baseline gap-2">
+                                          <span className="text-[11px] font-bold text-gray-900">
+                                            {comment.authorName}
+                                          </span>
+                                          <span className="text-[9px] text-gray-400">
+                                            {new Date(comment.created_at).toLocaleTimeString([], {
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                            })}
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                          {comment.content}
+                                        </p>
+                                      </div>
+
+                                      <button
+                                        onClick={() =>
+                                          isReplying ? cancelReply(comment.id) : startReply(comment.id)
+                                        }
+                                        className="text-[10px] text-gray-400 hover:text-pink-500 font-bold mt-1 ml-1 cursor-pointer"
+                                      >
+                                        {isReplying ? "Отменить" : "Ответить"}
+                                      </button>
+
+                                      {replies.length > 0 && (
+                                        <div className="mt-2 ml-2 pl-3 border-l-2 border-gray-100 space-y-2">
+                                          {replies.map((reply) => (
+                                            <div key={reply.id} className="flex items-start gap-2">
+                                              <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[9px] uppercase shrink-0">
+                                                {reply.authorName.slice(0, 2)}
+                                              </div>
+                                              <div className="bg-gray-50 rounded-2xl px-3 py-1.5 flex-1">
+                                                <div className="flex items-baseline gap-2">
+                                                  <span className="text-[10px] font-bold text-gray-900">
+                                                    {reply.authorName}
+                                                  </span>
+                                                  <span className="text-[9px] text-gray-400">
+                                                    {new Date(reply.created_at).toLocaleTimeString([], {
+                                                      hour: "2-digit",
+                                                      minute: "2-digit",
+                                                    })}
+                                                  </span>
+                                                </div>
+                                                <p className="text-[10px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                                  {reply.content}
+                                                </p>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {isReplying && (
+                                        <div className="flex items-center gap-2 mt-2 ml-2">
+                                          <input
+                                            type="text"
+                                            value={replyDrafts[comment.id] || ""}
+                                            onChange={(e) =>
+                                              handleReplyDraftChange(comment.id, e.target.value)
+                                            }
+                                            onKeyDown={(e) =>
+                                              e.key === "Enter" && handleAddReply(post.id, comment.id)
+                                            }
+                                            placeholder={"Ответить " + comment.authorName + "..."}
+                                            className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-1.5 text-[10px] focus:outline-none focus:border-pink-300"
+                                          />
+                                          <button
+                                            onClick={() => handleAddReply(post.id, comment.id)}
+                                            disabled={
+                                              isReplySubmitting || !(replyDrafts[comment.id] || "").trim()
+                                            }
+                                            className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[10px] font-bold px-3 py-1.5 rounded-2xl transition cursor-pointer shrink-0"
+                                          >
+                                            {isReplySubmitting ? "..." : "Отправить"}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
-                                  <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
-                                    {comment.content}
-                                  </p>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
 
@@ -1138,6 +1217,25 @@ export default function HomePage() {
             )}
           </div>
         </section>
+
+        {/* ПРАВАЯ КОЛОНКА: AI ПОМОЩНИК */}
+        <aside className="col-span-12 md:col-span-3 space-y-4">
+          <div className="bg-[#B3A1C9] rounded-3xl p-5 text-white shadow-xs sticky top-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black flex items-center gap-1">🤖 AI Помощник</h3>
+              <span className="bg-white/30 text-[9px] font-bold px-2 py-0.5 rounded-full">Онлайн</span>
+            </div>
+            <p className="text-[11px] leading-relaxed opacity-90">
+              Помогу оформить профиль и подберу первое сообщение.
+            </p>
+            <button
+              onClick={() => setIsAIModalOpen(true)}
+              className="w-full bg-white/30 hover:bg-white/40 text-white font-bold py-2.5 rounded-xl text-xs backdrop-blur-md transition cursor-pointer text-center"
+            >
+              Открыть AI
+            </button>
+          </div>
+        </aside>
       </main>
 
       <AIAssistantModal
@@ -1215,6 +1313,77 @@ export default function HomePage() {
               onClick={goToNextStory}
               className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
             />
+          </div>
+        </div>
+      )}
+
+      {repostPostId && repostPost && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={closeRepostModal}
+        >
+          <div
+            className="bg-white rounded-3xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-sm font-black text-gray-900">Отправить в сообщения</h3>
+              <button
+                onClick={closeRepostModal}
+                className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-b border-gray-100">
+              <p className="text-[11px] text-gray-500 line-clamp-2">
+                {repostPost.content}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {isLoadingRepostTargets ? (
+                <p className="text-xs text-gray-400 text-center py-6">Загрузка мэтчей...</p>
+              ) : repostTargets.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-6">
+                  Пока нет мэтчей, кому можно отправить
+                </p>
+              ) : (
+                repostTargets.map((target) => {
+                  const isSent = repostSentTo.has(target.matchId);
+                  const isSending = sendingRepostTo === target.matchId;
+
+                  return (
+                    <div
+                      key={target.matchId}
+                      className="flex items-center justify-between gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={target.avatar}
+                          alt={target.name}
+                          className="w-9 h-9 rounded-full object-cover"
+                        />
+                        <span className="text-xs font-bold text-gray-900">{target.name}</span>
+                      </div>
+
+                      <button
+                        onClick={() => handleSendRepost(target)}
+                        disabled={isSending || isSent}
+                        className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition cursor-pointer ${
+                          isSent
+                            ? "bg-emerald-50 text-emerald-600"
+                            : "bg-pink-500 hover:bg-pink-600 text-white disabled:opacity-50"
+                        }`}
+                      >
+                        {isSent ? "Отправлено ✓" : isSending ? "..." : "Отправить"}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
