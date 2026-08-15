@@ -59,6 +59,7 @@ export default function MessagesPage() {
     scrollToBottom();
   }, [messages]);
 
+  // Presence: кто прямо сейчас находится на странице сообщений
   useEffect(() => {
     if (!currentUserId) return;
 
@@ -83,6 +84,33 @@ export default function MessagesPage() {
 
     return () => {
       supabase.removeChannel(channel);
+    };
+  }, [currentUserId]);
+
+  // Heartbeat: периодически обновляем last_seen, пока страница открыта
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const updateLastSeen = async () => {
+      await supabase
+        .from("profiles")
+        .update({ last_seen: new Date().toISOString() })
+        .eq("id", currentUserId);
+    };
+
+    updateLastSeen();
+
+    const intervalId = setInterval(updateLastSeen, 30000);
+
+    const handleBeforeUnload = () => {
+      updateLastSeen();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      updateLastSeen();
     };
   }, [currentUserId]);
 
@@ -176,6 +204,34 @@ export default function MessagesPage() {
 
     init();
   }, []);
+
+  // Обновляем профиль выбранного собеседника каждые 30с (чтобы видеть свежий last_seen без перезагрузки)
+  useEffect(() => {
+    if (!selectedMatch) return;
+
+    const refreshSelectedProfile = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", selectedMatch.profile.id)
+        .single();
+
+      if (data) {
+        setSelectedMatch((prev) =>
+          prev ? { ...prev, profile: data } : prev
+        );
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.matchId === selectedMatch.matchId ? { ...m, profile: data } : m
+          )
+        );
+      }
+    };
+
+    const intervalId = setInterval(refreshSelectedProfile, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [selectedMatch?.matchId]);
 
   const markAsRead = async (conversationId: string, currentId: string) => {
     await supabase
@@ -331,7 +387,10 @@ export default function MessagesPage() {
 
     if (diffMinutes < 5) return "Был(а) только что";
     if (diffMinutes < 60) return `Был(а) ${diffMinutes} мин. назад`;
-    return `Был(а) в ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    if (diffMinutes < 60 * 24) {
+      return `Был(а) в ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    return `Был(а) ${date.toLocaleDateString([], { day: "2-digit", month: "2-digit" })}`;
   };
 
   const isSelectedUserOnline = selectedMatch
