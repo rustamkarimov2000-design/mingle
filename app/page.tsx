@@ -6,6 +6,15 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AIAssistantModal from "@/components/AIAssistantModal";
 
+interface Comment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  authorName: string;
+}
+
 interface Post {
   id: string;
   user_id: string;
@@ -46,7 +55,6 @@ export default function HomePage() {
 
   const [displayName, setDisplayName] = useState("Гость");
   const [userId, setUserId] = useState<string | null>(null);
-  const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [posts, setPosts] = useState<Post[]>([]);
@@ -60,6 +68,12 @@ export default function HomePage() {
 
   const [unreadCount, setUnreadCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
+
+  // Комментарии
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
+  const [openComments, setOpenComments] = useState<Set<string>>(new Set());
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [submittingComment, setSubmittingComment] = useState<Set<string>>(new Set());
 
   // Истории
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
@@ -86,12 +100,11 @@ export default function HomePage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name, avatar_url, avatar")
+        .select("name")
         .eq("id", authUser.id)
         .single();
 
       setDisplayName(profile?.name || authUser.email?.split("@")[0] || "Пользователь");
-      setUserAvatar(profile?.avatar_url || profile?.avatar || null);
       setIsLoaded(true);
     };
 
@@ -323,7 +336,6 @@ export default function HomePage() {
     }
   };
 
-  // Просмотрщик историй
   const openViewer = (groupIndex: number) => {
     setViewerGroupIndex(groupIndex);
     setViewerStoryIndex(0);
@@ -441,13 +453,37 @@ export default function HomePage() {
       const userIds = Array.from(new Set(postsData.map((p) => p.user_id)));
       const postIds = postsData.map((p) => p.id);
 
-      const [profilesRes, likesRes] = await Promise.all([
+      const [profilesRes, likesRes, commentsRes] = await Promise.all([
         supabase.from("profiles").select("id, name").in("id", userIds),
         supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
+        supabase
+          .from("post_comments")
+          .select("id, post_id, user_id, content, created_at")
+          .in("post_id", postIds)
+          .order("created_at", { ascending: true }),
       ]);
 
       const profilesMap = new Map(profilesRes.data?.map((p) => [p.id, p.name]));
       const likesData = likesRes.data || [];
+      const commentsData = commentsRes.data || [];
+
+      const commenterIds = Array.from(new Set(commentsData.map((c) => c.user_id)));
+      const { data: commenterProfiles } = commenterIds.length
+        ? await supabase.from("profiles").select("id, name").in("id", commenterIds)
+        : { data: [] as { id: string; name: string }[] };
+
+      const commenterMap = new Map((commenterProfiles || []).map((p) => [p.id, p.name]));
+
+      const commentsMap: Record<string, Comment[]> = {};
+      commentsData.forEach((c) => {
+        const enriched: Comment = {
+          ...c,
+          authorName: commenterMap.get(c.user_id) || "Пользователь",
+        };
+        if (!commentsMap[c.post_id]) commentsMap[c.post_id] = [];
+        commentsMap[c.post_id].push(enriched);
+      });
+      setCommentsByPost(commentsMap);
 
       const formattedPosts: Post[] = postsData.map((post) => ({
         ...post,
@@ -539,6 +575,67 @@ export default function HomePage() {
     }
 
     setIsSubmitting(false);
+  };
+
+  const toggleComments = (postId: string) => {
+    setOpenComments((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) {
+        next.delete(postId);
+      } else {
+        next.add(postId);
+      }
+      return next;
+    });
+  };
+
+  const handleCommentDraftChange = (postId: string, value: string) => {
+    setCommentDrafts((prev) => ({ ...prev, [postId]: value }));
+  };
+
+  const handleAddComment = async (postId: string) => {
+    if (!userId) {
+      router.push("/auth/login");
+      return;
+    }
+
+    const text = (commentDrafts[postId] || "").trim();
+    if (!text) return;
+
+    setSubmittingComment((prev) => new Set(prev).add(postId));
+
+    const { data, error } = await supabase
+      .from("post_comments")
+      .insert({
+        post_id: postId,
+        user_id: userId,
+        content: text,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Ошибка добавления комментария:", error);
+      alert("Не удалось добавить комментарий: " + error.message);
+    } else if (data) {
+      const newComment: Comment = {
+        ...data,
+        authorName: displayName,
+      };
+
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: [...(prev[postId] || []), newComment],
+      }));
+
+      setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+    }
+
+    setSubmittingComment((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
   };
 
   const handleLogout = async () => {
@@ -797,7 +894,7 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* ИСТОРИИ — теперь на всю ширину */}
+          {/* ИСТОРИИ */}
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -859,7 +956,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* СОЗДАНИЕ ПОСТА — теперь на всю ширину */}
+          {/* СОЗДАНИЕ ПОСТА */}
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-pink-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
@@ -936,6 +1033,9 @@ export default function HomePage() {
               posts.map((post) => {
                 const isLiked = (post.post_likes || []).some((like) => like.user_id === userId);
                 const likesOnPost = post.post_likes?.length || 0;
+                const postComments = commentsByPost[post.id] || [];
+                const isCommentsOpen = openComments.has(post.id);
+                const isCommentSubmitting = submittingComment.has(post.id);
 
                 return (
                   <div key={post.id} className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
@@ -970,10 +1070,68 @@ export default function HomePage() {
                         <span className="text-sm">{isLiked ? "💖" : "🤍"}</span>
                         <span>{likesOnPost}</span>
                       </button>
-                      <button className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer">
-                        💬 Комментировать
+                      <button
+                        onClick={() => toggleComments(post.id)}
+                        className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer"
+                      >
+                        💬 {isCommentsOpen ? "Скрыть" : "Комментировать"}
+                        {postComments.length > 0 && " (" + postComments.length + ")"}
                       </button>
                     </div>
+
+                    {isCommentsOpen && (
+                      <div className="pt-3 border-t border-gray-50 space-y-3">
+                        {postComments.length === 0 ? (
+                          <p className="text-[11px] text-gray-400 italic">
+                            Пока нет комментариев. Будьте первым!
+                          </p>
+                        ) : (
+                          <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                            {postComments.map((comment) => (
+                              <div key={comment.id} className="flex items-start gap-2.5">
+                                <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
+                                  {comment.authorName.slice(0, 2)}
+                                </div>
+                                <div className="bg-gray-50 rounded-2xl px-3 py-2 flex-1">
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-[11px] font-bold text-gray-900">
+                                      {comment.authorName}
+                                    </span>
+                                    <span className="text-[9px] text-gray-400">
+                                      {new Date(comment.created_at).toLocaleTimeString([], {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                    {comment.content}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={commentDrafts[post.id] || ""}
+                            onChange={(e) => handleCommentDraftChange(post.id, e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleAddComment(post.id)}
+                            placeholder="Написать комментарий..."
+                            className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-2 text-[11px] focus:outline-none focus:border-pink-300"
+                          />
+                          <button
+                            onClick={() => handleAddComment(post.id)}
+                            disabled={isCommentSubmitting || !(commentDrafts[post.id] || "").trim()}
+                            className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[11px] font-bold px-3.5 py-2 rounded-2xl transition cursor-pointer shrink-0"
+                          >
+                            {isCommentSubmitting ? "..." : "Отправить"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -987,11 +1145,9 @@ export default function HomePage() {
         onClose={() => setIsAIModalOpen(false)}
       />
 
-      {/* ПРОСМОТРЩИК ИСТОРИЙ */}
       {activeGroup && activeStory && (
         <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
           <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
-            {/* Прогресс-бары */}
             <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
               {activeGroup.stories.map((s, idx) => (
                 <div key={s.id} className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden">
@@ -1011,7 +1167,6 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* Шапка */}
             <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <img
@@ -1032,7 +1187,6 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Медиа */}
             <div className="w-full h-full flex items-center justify-center">
               {activeStory.media_type === "video" ? (
                 <video
@@ -1053,7 +1207,6 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Зоны навигации */}
             <div
               onClick={goToPrevStory}
               className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
