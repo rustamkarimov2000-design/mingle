@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,23 @@ interface Post {
   post_likes?: { user_id: string }[];
 }
 
+interface StoryItem {
+  id: string;
+  user_id: string;
+  media_url: string;
+  media_type: string;
+  created_at: string;
+}
+
+interface StoryGroup {
+  userId: string;
+  name: string;
+  avatar: string;
+  stories: StoryItem[];
+}
+
+const STORY_DURATION_MS = 5000;
+
 export default function HomePage() {
   const router = useRouter();
   const supabase = createClient();
@@ -29,6 +46,7 @@ export default function HomePage() {
 
   const [displayName, setDisplayName] = useState("Гость");
   const [userId, setUserId] = useState<string | null>(null);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [posts, setPosts] = useState<Post[]>([]);
@@ -42,6 +60,16 @@ export default function HomePage() {
 
   const [unreadCount, setUnreadCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
+
+  // Истории
+  const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
+  const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const storyFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [viewerGroupIndex, setViewerGroupIndex] = useState<number | null>(null);
+  const [viewerStoryIndex, setViewerStoryIndex] = useState(0);
+  const [viewerProgress, setViewerProgress] = useState(0);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -58,11 +86,12 @@ export default function HomePage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name")
+        .select("name, avatar_url, avatar")
         .eq("id", authUser.id)
         .single();
 
       setDisplayName(profile?.name || authUser.email?.split("@")[0] || "Пользователь");
+      setUserAvatar(profile?.avatar_url || profile?.avatar || null);
       setIsLoaded(true);
     };
 
@@ -181,6 +210,206 @@ export default function HomePage() {
       supabase.removeChannel(channel);
     };
   }, [userId]);
+
+  // Загрузка историй
+  const loadStories = useCallback(async () => {
+    const { data: storiesData, error } = await supabase
+      .from("stories")
+      .select("id, user_id, media_url, media_type, created_at")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Ошибка загрузки историй:", error);
+      return;
+    }
+
+    if (!storiesData || storiesData.length === 0) {
+      setStoryGroups([]);
+      return;
+    }
+
+    const userIds = Array.from(new Set(storiesData.map((s) => s.user_id)));
+
+    const { data: profilesData } = await supabase
+      .from("profiles")
+      .select("id, name, avatar_url, avatar")
+      .in("id", userIds);
+
+    const profilesMap = new Map(
+      (profilesData || []).map((p) => [p.id, p])
+    );
+
+    const groupsMap = new Map<string, StoryGroup>();
+
+    storiesData.forEach((story) => {
+      const profile = profilesMap.get(story.user_id);
+      if (!profile) return;
+
+      if (!groupsMap.has(story.user_id)) {
+        groupsMap.set(story.user_id, {
+          userId: story.user_id,
+          name: profile.name || "Пользователь",
+          avatar:
+            profile.avatar_url ||
+            profile.avatar ||
+            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+          stories: [],
+        });
+      }
+
+      groupsMap.get(story.user_id)!.stories.push(story);
+    });
+
+    groupsMap.forEach((group) => {
+      group.stories.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
+
+    setStoryGroups(Array.from(groupsMap.values()));
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      loadStories();
+    }
+  }, [isLoaded, loadStories]);
+
+  const handleCreateStoryClick = () => {
+    storyFileInputRef.current?.click();
+  };
+
+  const handleStoryFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    const isVideo = file.type.startsWith("video/");
+    const mediaType = isVideo ? "video" : "image";
+
+    try {
+      setIsUploadingStory(true);
+
+      const fileExt = file.name.split(".").pop();
+      const filePath = userId + "/" + Date.now() + "." + fileExt;
+
+      const { error: uploadError } = await supabase.storage
+        .from("stories")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("stories").getPublicUrl(filePath);
+
+      const { error: insertError } = await supabase.from("stories").insert({
+        user_id: userId,
+        media_url: publicUrl,
+        media_type: mediaType,
+      });
+
+      if (insertError) throw insertError;
+
+      await loadStories();
+    } catch (err: any) {
+      console.error("Ошибка загрузки истории:", err);
+      alert("Не удалось загрузить историю: " + (err.message || "неизвестная ошибка"));
+    } finally {
+      setIsUploadingStory(false);
+      if (storyFileInputRef.current) {
+        storyFileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Просмотрщик историй
+  const openViewer = (groupIndex: number) => {
+    setViewerGroupIndex(groupIndex);
+    setViewerStoryIndex(0);
+    setViewerProgress(0);
+  };
+
+  const closeViewer = () => {
+    setViewerGroupIndex(null);
+    setViewerStoryIndex(0);
+    setViewerProgress(0);
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+  };
+
+  const goToNextStory = useCallback(() => {
+    if (viewerGroupIndex === null) return;
+
+    const currentGroup = storyGroups[viewerGroupIndex];
+    if (!currentGroup) return;
+
+    if (viewerStoryIndex < currentGroup.stories.length - 1) {
+      setViewerStoryIndex((prev) => prev + 1);
+      setViewerProgress(0);
+    } else if (viewerGroupIndex < storyGroups.length - 1) {
+      setViewerGroupIndex((prev) => (prev !== null ? prev + 1 : null));
+      setViewerStoryIndex(0);
+      setViewerProgress(0);
+    } else {
+      closeViewer();
+    }
+  }, [viewerGroupIndex, viewerStoryIndex, storyGroups]);
+
+  const goToPrevStory = () => {
+    if (viewerGroupIndex === null) return;
+
+    if (viewerStoryIndex > 0) {
+      setViewerStoryIndex((prev) => prev - 1);
+      setViewerProgress(0);
+    } else if (viewerGroupIndex > 0) {
+      const prevGroup = storyGroups[viewerGroupIndex - 1];
+      setViewerGroupIndex((prev) => (prev !== null ? prev - 1 : null));
+      setViewerStoryIndex(prevGroup.stories.length - 1);
+      setViewerProgress(0);
+    }
+  };
+
+  useEffect(() => {
+    if (viewerGroupIndex === null) return;
+
+    const currentGroup = storyGroups[viewerGroupIndex];
+    const currentStory = currentGroup?.stories[viewerStoryIndex];
+
+    if (!currentStory) return;
+
+    if (currentStory.media_type === "video") {
+      return;
+    }
+
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+
+    const stepMs = 100;
+    const steps = STORY_DURATION_MS / stepMs;
+    let currentStep = 0;
+
+    progressIntervalRef.current = setInterval(() => {
+      currentStep += 1;
+      const pct = (currentStep / steps) * 100;
+      setViewerProgress(pct);
+
+      if (pct >= 100) {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+        }
+        goToNextStory();
+      }
+    }, stepMs);
+
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, [viewerGroupIndex, viewerStoryIndex, storyGroups, goToNextStory]);
 
   const fetchPosts = useCallback(async () => {
     setIsLoadingPosts(true);
@@ -347,14 +576,10 @@ export default function HomePage() {
     setInputAnonMessage("");
   };
 
-  const stories = [
-    { name: "Анна", avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150" },
-    { name: "Мария", avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150" },
-    { name: "София", avatar: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150" },
-    { name: "Ева", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150" },
-  ];
-
   if (!isLoaded) return null;
+
+  const activeGroup = viewerGroupIndex !== null ? storyGroups[viewerGroupIndex] : null;
+  const activeStory = activeGroup ? activeGroup.stories[viewerStoryIndex] : null;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12">
@@ -429,7 +654,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-[#EFA1A4] rounded-3xl p-5 text-white flex flex-col justify-between h-40 shadow-xs">
               <span className="text-[10px] uppercase tracking-wider font-extrabold opacity-90">
-                🥐 ДОБРЫЙ ВЕЧЕР
+                👋 ЗДРАВСТВУЙТЕ
               </span>
               <div>
                 <h2 className="text-xl font-black uppercase tracking-tight flex items-center gap-1 truncate">
@@ -572,75 +797,106 @@ export default function HomePage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-5 bg-white rounded-3xl p-5 shadow-xs border border-gray-100 flex flex-col justify-between space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">📸</span>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-gray-900">
-                    ИСТОРИИ
-                  </h3>
-                </div>
-                <span className="text-[10px] text-gray-400 font-medium">Свежее</span>
+          {/* ИСТОРИИ — теперь на всю ширину */}
+          <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">📸</span>
+                <h3 className="text-xs font-black uppercase tracking-wider text-gray-900">
+                  ИСТОРИИ
+                </h3>
               </div>
-
-              <div className="flex items-center gap-3 overflow-x-auto pb-1">
-                <div className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer">
-                  <div className="w-11 h-11 rounded-full border-2 border-dashed border-pink-400 bg-pink-50 flex items-center justify-center text-pink-600 font-bold text-sm">
-                    +
-                  </div>
-                  <span className="text-[10px] text-gray-600 font-medium">Создать</span>
-                </div>
-
-                {stories.map((s, idx) => (
-                  <div key={idx} className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer">
-                    <div className="w-11 h-11 rounded-full p-[2px] bg-gradient-to-tr from-pink-500 to-purple-500">
-                      <img src={s.avatar} alt={s.name} className="w-full h-full object-cover rounded-full" />
-                    </div>
-                    <span className="text-[10px] font-bold text-gray-700">{s.name}</span>
-                  </div>
-                ))}
-              </div>
+              <span className="text-[10px] text-gray-400 font-medium">Свежее</span>
             </div>
 
-            <div className="lg:col-span-7 bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-pink-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
-                  {displayName.slice(0, 2).toUpperCase()}
+            <div className="flex items-center gap-3 overflow-x-auto pb-1">
+              <div
+                onClick={handleCreateStoryClick}
+                className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer"
+              >
+                <div className="w-11 h-11 rounded-full border-2 border-dashed border-pink-400 bg-pink-50 flex items-center justify-center text-pink-600 font-bold text-sm">
+                  {isUploadingStory ? (
+                    <span className="text-[9px]">...</span>
+                  ) : (
+                    "+"
+                  )}
                 </div>
-                <input
-                  type="text"
-                  value={postText}
-                  onChange={(e) => setPostText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreatePost()}
-                  placeholder="О чем хотите рассказать?"
-                  className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-2 text-xs focus:outline-none focus:border-pink-300"
-                />
-                <button
-                  onClick={handleCreatePost}
-                  disabled={isSubmitting || !postText.trim()}
-                  className="bg-[#E02868] hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-2xl transition cursor-pointer shrink-0"
-                >
-                  {isSubmitting ? "Публикация..." : "Опубликовать"}
-                </button>
+                <span className="text-[10px] text-gray-600 font-medium">Создать</span>
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs overflow-x-auto">
-                <span className="text-gray-400 font-medium text-[10px]">Категория:</span>
-                {["Дружба", "Свидания", "Общение", "Интересы"].map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium transition cursor-pointer whitespace-nowrap ${
-                      selectedCategory === cat
-                        ? "bg-black text-white"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
+              <input
+                ref={storyFileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={handleStoryFileSelected}
+              />
+
+              {storyGroups.map((group, idx) => (
+                <div
+                  key={group.userId}
+                  onClick={() => openViewer(idx)}
+                  className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-full p-[2px] bg-gradient-to-tr from-pink-500 to-purple-500">
+                    <img
+                      src={group.avatar}
+                      alt={group.name}
+                      className="w-full h-full object-cover rounded-full"
+                    />
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-700 truncate max-w-[46px]">
+                    {group.name}
+                  </span>
+                </div>
+              ))}
+
+              {storyGroups.length === 0 && (
+                <span className="text-[11px] text-gray-400 pl-2">
+                  Пока никто не опубликовал историю
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* СОЗДАНИЕ ПОСТА — теперь на всю ширину */}
+          <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-pink-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                {displayName.slice(0, 2).toUpperCase()}
               </div>
+              <input
+                type="text"
+                value={postText}
+                onChange={(e) => setPostText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreatePost()}
+                placeholder="О чем хотите рассказать?"
+                className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-2 text-xs focus:outline-none focus:border-pink-300"
+              />
+              <button
+                onClick={handleCreatePost}
+                disabled={isSubmitting || !postText.trim()}
+                className="bg-[#E02868] hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-2xl transition cursor-pointer shrink-0"
+              >
+                {isSubmitting ? "Публикация..." : "Опубликовать"}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs overflow-x-auto">
+              <span className="text-gray-400 font-medium text-[10px]">Категория:</span>
+              {["Дружба", "Свидания", "Общение", "Интересы"].map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium transition cursor-pointer whitespace-nowrap ${
+                    selectedCategory === cat
+                      ? "bg-black text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -730,6 +986,85 @@ export default function HomePage() {
         isOpen={isAIModalOpen}
         onClose={() => setIsAIModalOpen(false)}
       />
+
+      {/* ПРОСМОТРЩИК ИСТОРИЙ */}
+      {activeGroup && activeStory && (
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+          <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
+            {/* Прогресс-бары */}
+            <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
+              {activeGroup.stories.map((s, idx) => (
+                <div key={s.id} className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden">
+                  <div
+                    className="h-full bg-white"
+                    style={{
+                      width:
+                        idx < viewerStoryIndex
+                          ? "100%"
+                          : idx === viewerStoryIndex
+                          ? viewerProgress + "%"
+                          : "0%",
+                      transition: idx === viewerStoryIndex ? "none" : undefined,
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Шапка */}
+            <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <img
+                  src={activeGroup.avatar}
+                  alt={activeGroup.name}
+                  className="w-8 h-8 rounded-full object-cover border border-white/50"
+                />
+                <span className="text-white text-xs font-bold drop-shadow">
+                  {activeGroup.name}
+                </span>
+              </div>
+
+              <button
+                onClick={closeViewer}
+                className="text-white text-xl font-bold px-2 drop-shadow cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Медиа */}
+            <div className="w-full h-full flex items-center justify-center">
+              {activeStory.media_type === "video" ? (
+                <video
+                  key={activeStory.id}
+                  src={activeStory.media_url}
+                  className="w-full h-full object-contain"
+                  autoPlay
+                  playsInline
+                  onEnded={goToNextStory}
+                />
+              ) : (
+                <img
+                  key={activeStory.id}
+                  src={activeStory.media_url}
+                  alt=""
+                  className="w-full h-full object-contain"
+                />
+              )}
+            </div>
+
+            {/* Зоны навигации */}
+            <div
+              onClick={goToPrevStory}
+              className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+            />
+            <div
+              onClick={goToNextStory}
+              className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
