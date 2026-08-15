@@ -1,88 +1,156 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
+import { createClient } from "@/lib/supabase/client";
 
 interface Person {
-  id: number;
+  id: string;
   name: string;
-  age: number;
-  city: string;
-  avatarBg: string;
-  bio: string;
-  interests: string[];
-  online: boolean;
+  age?: number;
+  city?: string;
+  bio?: string;
+  avatar_url?: string;
+  avatar?: string;
+  last_seen?: string;
 }
 
-const initialPeople: Person[] = [
-  {
-    id: 1,
-    name: "Екатерина Иванова",
-    age: 24,
-    city: "Москва",
-    avatarBg: "f472b6",
-    bio: "Люблю путешествия, кофе и веб-дизайн ✨",
-    interests: ["Путешествия", "Дизайн", "Кофе"],
-    online: true,
-  },
-  {
-    id: 2,
-    name: "Дмитрий Петров",
-    age: 28,
-    city: "Санкт-Петербург",
-    avatarBg: "60a5fa",
-    bio: "Frontend developer, бегаю марафоны 🏃‍♂️",
-    interests: ["Кодинг", "Бег", "Музыка"],
-    online: false,
-  },
-  {
-    id: 3,
-    name: "Ольга Сидорова",
-    age: 22,
-    city: "Казань",
-    avatarBg: "34d399",
-    bio: "Фотограф, ищу единомышленников для творческих проектов 📸",
-    interests: ["Фотография", "Искусство", "Кино"],
-    online: true,
-  },
-  {
-    id: 4,
-    name: "Алексей Смирнов",
-    age: 26,
-    city: "Новосибирск",
-    avatarBg: "fbbf24",
-    bio: "Люблю настолки и походы 🏕",
-    interests: ["Настолки", "Походы", "IT"],
-    online: true,
-  },
-];
-
-const getAvatarUrl = (name: string, bg: string) =>
-  `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=${bg}&color=fff`;
+type RelationStatus = "none" | "liked" | "matched";
 
 export default function PeoplePage() {
   const router = useRouter();
-  const [people] = useState<Person[]>(initialPeople);
+  const supabase = createClient();
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [relations, setRelations] = useState<Record<string, RelationStatus>>({});
   const [search, setSearch] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const getAvatar = (p: Person) =>
+    p.avatar_url ||
+    p.avatar ||
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500";
+
+  const isOnline = (lastSeen?: string) => {
+    if (!lastSeen) return false;
+    const diffMinutes = (Date.now() - new Date(lastSeen).getTime()) / 60000;
+    return diffMinutes < 5;
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      setIsLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/auth/login");
+        return;
+      }
+
+      setCurrentUserId(user.id);
+
+      const { data: profilesData, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, name, age, city, bio, avatar_url, avatar, last_seen")
+        .neq("id", user.id);
+
+      if (profilesError) {
+        console.error("Ошибка загрузки людей:", profilesError);
+        setIsLoading(false);
+        return;
+      }
+
+      setPeople(profilesData || []);
+
+      const [matches1Res, matches2Res, likesRes] = await Promise.all([
+        supabase.from("matches").select("user2_id").eq("user1_id", user.id),
+        supabase.from("matches").select("user1_id").eq("user2_id", user.id),
+        supabase.from("likes").select("to_user_id").eq("from_user_id", user.id),
+      ]);
+
+      const matchedIds = new Set<string>([
+        ...(matches1Res.data || []).map((m) => m.user2_id),
+        ...(matches2Res.data || []).map((m) => m.user1_id),
+      ]);
+
+      const likedIds = new Set<string>(
+        (likesRes.data || []).map((l) => l.to_user_id)
+      );
+
+      const relationMap: Record<string, RelationStatus> = {};
+      (profilesData || []).forEach((p) => {
+        if (matchedIds.has(p.id)) {
+          relationMap[p.id] = "matched";
+        } else if (likedIds.has(p.id)) {
+          relationMap[p.id] = "liked";
+        } else {
+          relationMap[p.id] = "none";
+        }
+      });
+
+      setRelations(relationMap);
+      setIsLoading(false);
+    };
+
+    load();
+  }, []);
+
+  const handleLike = async (person: Person) => {
+    if (!currentUserId) return;
+    setBusyId(person.id);
+
+    const { error } = await supabase.from("likes").insert({
+      from_user_id: currentUserId,
+      to_user_id: person.id,
+    });
+
+    if (error) {
+      console.error("Ошибка отправки лайка:", error);
+      setBusyId(null);
+      return;
+    }
+
+    const { data: theyLikedMe } = await supabase
+      .from("likes")
+      .select("id")
+      .eq("from_user_id", person.id)
+      .eq("to_user_id", currentUserId)
+      .maybeSingle();
+
+    if (theyLikedMe) {
+      const { error: matchError } = await supabase.from("matches").insert({
+        user1_id: currentUserId,
+        user2_id: person.id,
+      });
+
+      if (matchError) {
+        console.error("Ошибка создания мэтча:", matchError);
+      }
+
+      setRelations((prev) => ({ ...prev, [person.id]: "matched" }));
+    } else {
+      setRelations((prev) => ({ ...prev, [person.id]: "liked" }));
+    }
+
+    setBusyId(null);
+  };
+
+  const handleOpenChat = (person: Person) => {
+    router.push(`/messages?userId=${person.id}`);
+  };
 
   const filteredPeople = people.filter(
     (person) =>
-      person.name.toLowerCase().includes(search.toLowerCase()) ||
-      person.city.toLowerCase().includes(search.toLowerCase())
+      (person.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (person.city || "").toLowerCase().includes(search.toLowerCase())
   );
-
-  const handleOpenChat = (person: Person) => {
-    const pendingChat = {
-      id: person.id,
-      name: person.name,
-      avatar: getAvatarUrl(person.name, person.avatarBg),
-      online: person.online,
-    };
-    localStorage.setItem("mingle_pending_chat", JSON.stringify(pendingChat));
-    router.push(`/messages?userId=${person.id}`);
-  };
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -108,55 +176,82 @@ export default function PeoplePage() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              {filteredPeople.map((person) => (
-                <div
-                  key={person.id}
-                  className="flex flex-col justify-between rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md"
-                >
-                  <div>
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="relative">
-                        <img
-                          src={getAvatarUrl(person.name, person.avatarBg)}
-                          alt={person.name}
-                          className="h-16 w-16 rounded-full border object-cover"
-                        />
-                        {person.online && (
-                          <span className="absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white bg-green-500" />
+            {isLoading ? (
+              <div className="rounded-3xl border bg-white p-8 text-center text-sm text-gray-400">
+                Загрузка анкет...
+              </div>
+            ) : filteredPeople.length === 0 ? (
+              <div className="rounded-3xl border bg-white p-8 text-center text-sm text-gray-400">
+                Никого не нашлось
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                {filteredPeople.map((person) => {
+                  const status = relations[person.id] || "none";
+                  const online = isOnline(person.last_seen);
+                  const isBusy = busyId === person.id;
+
+                  return (
+                    <div
+                      key={person.id}
+                      className="flex flex-col justify-between rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md"
+                    >
+                      <div>
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="relative">
+                            <img
+                              src={getAvatar(person)}
+                              alt={person.name}
+                              className="h-16 w-16 rounded-full border object-cover"
+                            />
+                            {online && (
+                              <span className="absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white bg-green-500" />
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">
+                              {person.name}
+                              {person.age ? ", " + person.age : ""}
+                            </h3>
+                            {person.city && (
+                              <p className="text-xs text-gray-500">{person.city}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {person.bio && (
+                          <p className="mb-6 text-sm text-gray-600">{person.bio}</p>
                         )}
                       </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">
-                          {person.name}, {person.age}
-                        </h3>
-                        <p className="text-xs text-gray-500">{person.city}</p>
-                      </div>
-                    </div>
 
-                    <p className="mb-4 text-sm text-gray-600">{person.bio}</p>
-
-                    <div className="mb-6 flex flex-wrap gap-1.5">
-                      {person.interests.map((interest, i) => (
-                        <span
-                          key={i}
-                          className="rounded-full bg-pink-50 px-3 py-1 text-xs font-medium text-pink-600"
+                      {status === "matched" ? (
+                        <button
+                          onClick={() => handleOpenChat(person)}
+                          className="w-full rounded-2xl bg-pink-600 py-2.5 text-sm font-semibold text-white transition hover:bg-pink-700 active:scale-95"
                         >
-                          #{interest}
-                        </span>
-                      ))}
+                          Написать сообщение
+                        </button>
+                      ) : status === "liked" ? (
+                        <button
+                          disabled
+                          className="w-full rounded-2xl bg-gray-100 py-2.5 text-sm font-semibold text-gray-400 cursor-default"
+                        >
+                          Лайк отправлен
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleLike(person)}
+                          disabled={isBusy}
+                          className="w-full rounded-2xl bg-pink-50 py-2.5 text-sm font-semibold text-pink-600 transition hover:bg-pink-100 active:scale-95 disabled:opacity-50"
+                        >
+                          {isBusy ? "..." : "Лайкнуть 💗"}
+                        </button>
+                      )}
                     </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleOpenChat(person)}
-                    className="w-full rounded-2xl bg-pink-600 py-2.5 text-sm font-semibold text-white transition hover:bg-pink-700 active:scale-95"
-                  >
-                    Написать сообщение
-                  </button>
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </div>
       </main>
