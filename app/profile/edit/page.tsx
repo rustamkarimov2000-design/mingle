@@ -10,6 +10,50 @@ interface Photo {
   position: number;
 }
 
+const ZODIAC_SIGNS = [
+  "Овен",
+  "Телец",
+  "Близнецы",
+  "Рак",
+  "Лев",
+  "Дева",
+  "Весы",
+  "Скорпион",
+  "Стрелец",
+  "Козерог",
+  "Водолей",
+  "Рыбы",
+];
+
+const DATING_GOALS = ["Свидания", "Дружба", "Общение", "Серьёзные отношения"];
+
+const WORLDVIEWS = [
+  "Не указано",
+  "Православие",
+  "Ислам",
+  "Католицизм",
+  "Иудаизм",
+  "Буддизм",
+  "Атеизм",
+  "Агностицизм",
+  "Другое",
+];
+
+const EDUCATION_LEVELS = [
+  "Не указано",
+  "Среднее",
+  "Среднее специальное",
+  "Незаконченное высшее",
+  "Высшее",
+  "Учёная степень",
+];
+
+const CHILDREN_OPTIONS = ["Не указано", "Нет", "Есть", "Хочу детей", "Не хочу детей"];
+
+const HABIT_OPTIONS = ["Не указано", "Не употребляю", "Редко", "Нейтрально", "Часто"];
+
+const GENDER_OPTIONS = ["Не указано", "Мужской", "Женский"];
+
 export default function EditProfilePage() {
   const router = useRouter();
   const supabase = createClient();
@@ -38,6 +82,17 @@ export default function EditProfilePage() {
     avatar_url: "",
     latitude: null as number | null,
     longitude: null as number | null,
+    gender: "",
+    dating_goal: "",
+    worldview: "",
+    zodiac_sign: "",
+    height: "",
+    education: "",
+    children: "",
+    languages: "",
+    alcohol: "",
+    smoking: "",
+    interestsText: "",
   });
 
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -72,6 +127,17 @@ export default function EditProfilePage() {
           avatar_url: data.avatar_url || data.avatar || "",
           latitude: data.latitude ?? null,
           longitude: data.longitude ?? null,
+          gender: data.gender || "",
+          dating_goal: data.dating_goal || "",
+          worldview: data.worldview || "",
+          zodiac_sign: data.zodiac_sign || "",
+          height: data.height ? String(data.height) : "",
+          education: data.education || "",
+          children: data.children || "",
+          languages: Array.isArray(data.languages) ? data.languages.join(", ") : "",
+          alcohol: data.alcohol || "",
+          smoking: data.smoking || "",
+          interestsText: Array.isArray(data.interests) ? data.interests.join(", ") : "",
         });
 
         if (data.latitude != null && data.longitude != null) {
@@ -267,16 +333,38 @@ export default function EditProfilePage() {
     setSaving(true);
     setMessage(null);
 
+    const languagesArray = profile.languages
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const interestsArray = profile.interestsText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     const updates = {
       id: profile.id,
       name: profile.name,
       age: profile.age ? Number(profile.age) : null,
       bio: profile.bio,
       city: profile.city,
+      occupation: profile.occupation,
       avatar_url: profile.avatar_url,
       avatar: profile.avatar_url,
       latitude: profile.latitude,
       longitude: profile.longitude,
+      gender: profile.gender || null,
+      dating_goal: profile.dating_goal || null,
+      worldview: profile.worldview || null,
+      zodiac_sign: profile.zodiac_sign || null,
+      height: profile.height ? Number(profile.height) : null,
+      education: profile.education || null,
+      children: profile.children || null,
+      languages: languagesArray,
+      alcohol: profile.alcohol || null,
+      smoking: profile.smoking || null,
+      interests: interestsArray,
     };
 
     const { error } = await supabase
@@ -317,6 +405,9 @@ export default function EditProfilePage() {
 
   const defaultAvatar =
     "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500";
+
+  const selectClass =
+    "w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition";
 
   return (
     <main className="max-w-md mx-auto px-4 py-6 space-y-6">
@@ -444,25 +535,83 @@ export default function EditProfilePage() {
           />
         </div>
 
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Возраст
+            </label>
+
+            <input
+              type="number"
+              value={profile.age}
+              onChange={(e) =>
+                setProfile({
+                  ...profile,
+                  age: e.target.value,
+                })
+              }
+              placeholder="Лет"
+              min={18}
+              max={100}
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Рост, см
+            </label>
+
+            <input
+              type="number"
+              value={profile.height}
+              onChange={(e) =>
+                setProfile({
+                  ...profile,
+                  height: e.target.value,
+                })
+              }
+              placeholder="Например, 170"
+              min={100}
+              max={250}
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+            />
+          </div>
+        </div>
+
         <div>
           <label className="block text-xs font-bold text-gray-600 mb-1">
-            Возраст
+            Пол
           </label>
+          <select
+            value={profile.gender}
+            onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
+            className={selectClass}
+          >
+            {GENDER_OPTIONS.map((opt) => (
+              <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          <input
-            type="number"
-            value={profile.age}
-            onChange={(e) =>
-              setProfile({
-                ...profile,
-                age: e.target.value,
-              })
-            }
-            placeholder="Сколько вам лет?"
-            min={18}
-            max={100}
-            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
-          />
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Я здесь для
+          </label>
+          <select
+            value={profile.dating_goal}
+            onChange={(e) => setProfile({ ...profile, dating_goal: e.target.value })}
+            className={selectClass}
+          >
+            <option value="">Не указано</option>
+            {DATING_GOALS.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
@@ -479,7 +628,26 @@ export default function EditProfilePage() {
                 city: e.target.value,
               })
             }
-            placeholder="Ваш город"
+            placeholder="Например, Челябинск"
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Сфера работы
+          </label>
+
+          <input
+            type="text"
+            value={profile.occupation}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                occupation: e.target.value,
+              })
+            }
+            placeholder="Например, IT, дизайн, медицина..."
             className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
           />
         </div>
@@ -524,6 +692,147 @@ export default function EditProfilePage() {
             rows={3}
             className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition resize-none"
           />
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-gray-600 mb-1">
+            Интересы (через запятую)
+          </label>
+
+          <input
+            type="text"
+            value={profile.interestsText}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                interestsText: e.target.value,
+              })
+            }
+            placeholder="Например: Кофе, ИТ, Настолки"
+            className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+          />
+        </div>
+
+        <div className="pt-2 border-t border-gray-100 space-y-4">
+          <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+            Подробнее о вас
+          </h3>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Мировоззрение
+            </label>
+            <select
+              value={profile.worldview}
+              onChange={(e) => setProfile({ ...profile, worldview: e.target.value })}
+              className={selectClass}
+            >
+              {WORLDVIEWS.map((opt) => (
+                <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Знак зодиака
+            </label>
+            <select
+              value={profile.zodiac_sign}
+              onChange={(e) => setProfile({ ...profile, zodiac_sign: e.target.value })}
+              className={selectClass}
+            >
+              <option value="">Не указано</option>
+              {ZODIAC_SIGNS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Образование
+            </label>
+            <select
+              value={profile.education}
+              onChange={(e) => setProfile({ ...profile, education: e.target.value })}
+              className={selectClass}
+            >
+              {EDUCATION_LEVELS.map((opt) => (
+                <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Дети
+            </label>
+            <select
+              value={profile.children}
+              onChange={(e) => setProfile({ ...profile, children: e.target.value })}
+              className={selectClass}
+            >
+              {CHILDREN_OPTIONS.map((opt) => (
+                <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Языки (через запятую)
+            </label>
+            <input
+              type="text"
+              value={profile.languages}
+              onChange={(e) => setProfile({ ...profile, languages: e.target.value })}
+              placeholder="Например: Русский, Английский"
+              className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Алкоголь
+            </label>
+            <select
+              value={profile.alcohol}
+              onChange={(e) => setProfile({ ...profile, alcohol: e.target.value })}
+              className={selectClass}
+            >
+              {HABIT_OPTIONS.map((opt) => (
+                <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              Курение
+            </label>
+            <select
+              value={profile.smoking}
+              onChange={(e) => setProfile({ ...profile, smoking: e.target.value })}
+              className={selectClass}
+            >
+              {HABIT_OPTIONS.map((opt) => (
+                <option key={opt} value={opt === "Не указано" ? "" : opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <button
