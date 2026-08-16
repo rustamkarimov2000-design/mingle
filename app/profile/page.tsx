@@ -15,6 +15,16 @@ interface Profile {
   interests?: string[];
   avatar_url?: string;
   avatar?: string;
+  // Новые поля анкеты
+  dating_goal?: string; // "Я здесь для..."
+  worldview?: string; // Мировоззрение
+  zodiac_sign?: string; // Знак зодиака
+  height?: number; // Рост, см
+  education?: string; // Образование
+  children?: string; // Дети
+  languages?: string[]; // Языки
+  alcohol?: string; // Алкоголь
+  smoking?: string; // Курение
 }
 
 export default function ProfilePage() {
@@ -95,6 +105,20 @@ export default function ProfilePage() {
     );
   }
 
+  // Список деталей анкеты в духе "Мировоззрение / Знак зодиака / Рост..."
+  const detailRows: { label: string; value: string }[] = [];
+
+  if (profile?.city) detailRows.push({ label: "Город", value: profile.city });
+  if (profile?.worldview) detailRows.push({ label: "Мировоззрение", value: profile.worldview });
+  if (profile?.zodiac_sign) detailRows.push({ label: "Знак зодиака", value: profile.zodiac_sign });
+  if (profile?.height) detailRows.push({ label: "Рост", value: profile.height + " см" });
+  if (profile?.education) detailRows.push({ label: "Образование", value: profile.education });
+  if (profile?.children) detailRows.push({ label: "Дети", value: profile.children });
+  if (profile?.languages && profile.languages.length > 0)
+    detailRows.push({ label: "Языки", value: profile.languages.join(", ") });
+  if (profile?.alcohol) detailRows.push({ label: "Алкоголь", value: profile.alcohol });
+  if (profile?.smoking) detailRows.push({ label: "Курение", value: profile.smoking });
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 flex flex-col items-center pb-8 select-none">
       <header className="w-full max-w-md px-6 h-16 flex items-center justify-between border-b border-gray-100 bg-white sticky top-0 z-20">
@@ -168,6 +192,13 @@ export default function ProfilePage() {
         </div>
 
         <div className="p-6 space-y-6">
+          {profile?.dating_goal && (
+            <div className="flex items-center gap-2 text-xs font-bold text-pink-700 bg-pink-50 p-3 rounded-xl border border-pink-100">
+              <span>💗</span>
+              <span>Я здесь для: {profile.dating_goal}</span>
+            </div>
+          )}
+
           {profile?.occupation && (
             <div className="flex items-center gap-2 text-xs font-medium text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100">
               <span>💼</span>
@@ -197,6 +228,25 @@ export default function ProfilePage() {
                   >
                     {interest}
                   </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {detailRows.length > 0 && (
+            <div>
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2.5">
+                Подробнее
+              </h3>
+              <div className="rounded-2xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+                {detailRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between px-4 py-3 text-xs"
+                  >
+                    <span className="text-gray-400 font-medium">{row.label}</span>
+                    <span className="text-gray-800 font-bold">{row.value}</span>
+                  </div>
                 ))}
               </div>
             </div>
