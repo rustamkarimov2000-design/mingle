@@ -586,6 +586,21 @@ export default function HomePage() {
     setIsSubmitting(false);
   };
 
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm("Удалить этот пост? Это действие нельзя отменить.")) return;
+
+    const previousPosts = posts;
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+
+    const { error } = await supabase.from("posts").delete().eq("id", postId);
+
+    if (error) {
+      console.error("Ошибка удаления поста:", error);
+      alert("Не удалось удалить пост: " + error.message);
+      setPosts(previousPosts);
+    }
+  };
+
   const toggleComments = (postId: string) => {
     setOpenComments((prev) => {
       const next = new Set(prev);
@@ -821,12 +836,18 @@ export default function HomePage() {
         <div className="flex items-center gap-3">
           {displayName !== "Гость" ? (
             <>
-              <div className="flex items-center bg-gray-100 rounded-full p-1 text-xs font-bold">
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                👋 Здравствуйте, <span className="font-black text-gray-900">{displayName}</span>
+              </span>
+              <Link
+                href="/profile"
+                className="flex items-center bg-gray-100 hover:bg-gray-200 rounded-full p-1 text-xs font-bold transition cursor-pointer"
+              >
                 <span className="bg-pink-500 text-white px-2.5 py-1 rounded-full uppercase text-[10px]">
                   {displayName.slice(0, 2)}
                 </span>
                 <span className="px-3 text-gray-800 uppercase tracking-wider">{displayName}</span>
-              </div>
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-500 hover:text-gray-900 font-medium px-3 py-1.5 rounded-full border border-gray-200 bg-white cursor-pointer"
@@ -848,36 +869,36 @@ export default function HomePage() {
       <main className="max-w-7xl mx-auto px-6 pt-4 grid grid-cols-12 gap-6">
         {/* ЛЕВОЕ МЕНЮ */}
         <aside className="col-span-12 md:col-span-3 space-y-2">
-          <div className="bg-white rounded-3xl p-3 shadow-xs border border-gray-100 space-y-1 sticky top-4">
-            <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gray-100 font-bold text-xs text-gray-900">
+          <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-100 space-y-1.5 sticky top-4">
+            <Link href="/" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl bg-gray-100 font-bold text-sm text-gray-900">
               🏠 Главная
             </Link>
-            <Link href="/discover" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+            <Link href="/discover" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
               🔥 Смотреть людей
             </Link>
-            <Link href="/matches" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+            <Link href="/matches" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
               💫 Мэтчи
             </Link>
-            <Link href="/likes" className="flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
-              <span className="flex items-center gap-3">💌 Лайки</span>
+            <Link href="/likes" className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+              <span className="flex items-center gap-3.5">💌 Лайки</span>
               {likesCount > 0 && (
                 <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
                   {likesCount > 9 ? "9+" : likesCount}
                 </span>
               )}
             </Link>
-            <Link href="/people" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+            <Link href="/people" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
               👥 Люди
             </Link>
-            <Link href="/messages" className="flex items-center justify-between px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
-              <span className="flex items-center gap-3">💬 Сообщения</span>
+            <Link href="/messages" className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+              <span className="flex items-center gap-3.5">💬 Сообщения</span>
               {unreadCount > 0 && (
                 <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </Link>
-            <Link href="/profile" className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-gray-50 font-bold text-xs text-gray-600 transition">
+            <Link href="/profile" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
               👤 Мой профиль
             </Link>
           </div>
@@ -885,11 +906,6 @@ export default function HomePage() {
 
         {/* ЦЕНТРАЛЬНАЯ ЛЕНТА */}
         <section className="col-span-12 md:col-span-6 space-y-6">
-          <div className="flex items-baseline gap-1.5 px-1">
-            <span className="text-xs text-gray-400">👋 Здравствуйте,</span>
-            <span className="text-xs font-black text-gray-900">{displayName}</span>
-          </div>
-
           {/* ИСТОРИИ */}
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
@@ -1033,6 +1049,7 @@ export default function HomePage() {
                 const topLevelComments = allPostComments.filter((c) => !c.parent_comment_id);
                 const isCommentsOpen = openComments.has(post.id);
                 const isCommentSubmitting = submittingComment.has(post.id);
+                const isOwnPost = post.user_id === userId;
 
                 const getReplies = (commentId: string) =>
                   allPostComments.filter((c) => c.parent_comment_id === commentId);
@@ -1051,9 +1068,20 @@ export default function HomePage() {
                           </span>
                         </div>
                       </div>
-                      <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-3 py-1 rounded-full">
-                        {post.category}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-3 py-1 rounded-full">
+                          {post.category}
+                        </span>
+                        {isOwnPost && (
+                          <button
+                            onClick={() => handleDeletePost(post.id)}
+                            title="Удалить пост"
+                            className="text-gray-300 hover:text-red-500 transition cursor-pointer text-sm px-1"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
