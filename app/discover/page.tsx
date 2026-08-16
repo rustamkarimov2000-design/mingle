@@ -25,6 +25,7 @@ interface Candidate {
   name: string;
   age: number;
   city: string;
+  gender: string | null;
   bio: string;
   avatar: string;
   photos: string[];
@@ -32,9 +33,15 @@ interface Candidate {
   distanceKm: number | null;
 }
 
+const DEFAULT_MIN_AGE = 18;
+const DEFAULT_MAX_AGE = 99;
+
 export default function DiscoverPage() {
   const [selectedCity, setSelectedCity] = useState("Все");
   const [selectedInterest, setSelectedInterest] = useState("Все");
+  const [selectedGender, setSelectedGender] = useState("Все");
+  const [minAge, setMinAge] = useState(DEFAULT_MIN_AGE);
+  const [maxAge, setMaxAge] = useState(DEFAULT_MAX_AGE);
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [matchedUser, setMatchedUser] = useState<Candidate | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,15 +129,20 @@ export default function DiscoverPage() {
             ? calculateDistance(myLat, myLon, profile.latitude, profile.longitude)
             : null;
 
+        const interests = Array.isArray(profile.interests)
+          ? profile.interests.filter(Boolean)
+          : [];
+
         return {
           id: profile.id,
           name: profile.name || "Без имени",
           age: profile.age || 18,
           city: profile.city || "Не указан",
+          gender: profile.gender || null,
           bio: profile.bio || "Пока ничего не рассказал о себе 😊",
           avatar: mainPhoto,
           photos: uniquePhotos,
-          interests: ["Mingle"],
+          interests,
           distanceKm,
         };
       }) || [];
@@ -144,11 +156,37 @@ export default function DiscoverPage() {
   const likeOpacity = useTransform(x, [10, 100], [0, 1]);
   const dislikeOpacity = useTransform(x, [-10, -100], [0, 1]);
 
+  // Динамические списки фильтров на основе реально загруженных анкет
+  const cityOptions = [
+    "Все",
+    ...Array.from(new Set(candidates.map((c) => c.city).filter(Boolean))),
+  ];
+  const interestOptions = [
+    "Все",
+    ...Array.from(new Set(candidates.flatMap((c) => c.interests))),
+  ];
+  const genderOptions = [
+    "Все",
+    ...Array.from(new Set(candidates.map((c) => c.gender).filter(Boolean) as string[])),
+  ];
+
+  const resetFilters = () => {
+    setSelectedCity("Все");
+    setSelectedInterest("Все");
+    setSelectedGender("Все");
+    setMinAge(DEFAULT_MIN_AGE);
+    setMaxAge(DEFAULT_MAX_AGE);
+    setCurrentIndex(0);
+    setPhotoIndex(0);
+  };
+
   const filteredCandidates = candidates.filter((user) => {
     const cityMatch = selectedCity === "Все" || user.city === selectedCity;
     const interestMatch =
       selectedInterest === "Все" || user.interests.includes(selectedInterest);
-    return cityMatch && interestMatch;
+    const genderMatch = selectedGender === "Все" || user.gender === selectedGender;
+    const ageMatch = user.age >= minAge && user.age <= maxAge;
+    return cityMatch && interestMatch && genderMatch && ageMatch;
   });
 
   const currentCandidate = filteredCandidates[currentIndex];
@@ -284,12 +322,7 @@ export default function DiscoverPage() {
               ⚙️ Фильтры поиска
             </h2>
             <button
-              onClick={() => {
-                setSelectedCity("Все");
-                setSelectedInterest("Все");
-                setCurrentIndex(0);
-                setPhotoIndex(0);
-              }}
+              onClick={resetFilters}
               className="text-[11px] font-bold text-pink-600 hover:underline cursor-pointer"
             >
               Сбросить
@@ -300,7 +333,7 @@ export default function DiscoverPage() {
             <div>
               <label className="block text-gray-400 font-medium mb-1.5 text-[11px]">Город:</label>
               <div className="flex flex-wrap gap-2">
-                {["Все", "Москва", "Санкт-Петербург"].map((city) => (
+                {cityOptions.map((city) => (
                   <button
                     key={city}
                     onClick={() => {
@@ -321,25 +354,95 @@ export default function DiscoverPage() {
             </div>
 
             <div>
+              <label className="block text-gray-400 font-medium mb-1.5 text-[11px]">Пол:</label>
+              <div className="flex flex-wrap gap-2">
+                {genderOptions.length > 1 ? (
+                  genderOptions.map((gender) => (
+                    <button
+                      key={gender}
+                      onClick={() => {
+                        setSelectedGender(gender);
+                        setCurrentIndex(0);
+                        setPhotoIndex(0);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                        selectedGender === gender
+                          ? "bg-black text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {gender}
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-gray-300 italic">
+                    Нет данных о поле в анкетах
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-gray-400 font-medium mb-1.5 text-[11px]">
+                Возраст: {minAge}–{maxAge}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={DEFAULT_MIN_AGE}
+                  max={maxAge}
+                  value={minAge}
+                  onChange={(e) => {
+                    const val = Math.min(Number(e.target.value) || DEFAULT_MIN_AGE, maxAge);
+                    setMinAge(val);
+                    setCurrentIndex(0);
+                    setPhotoIndex(0);
+                  }}
+                  className="w-16 rounded-xl border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:border-pink-300"
+                />
+                <span className="text-gray-300">—</span>
+                <input
+                  type="number"
+                  min={minAge}
+                  max={DEFAULT_MAX_AGE}
+                  value={maxAge}
+                  onChange={(e) => {
+                    const val = Math.max(Number(e.target.value) || DEFAULT_MAX_AGE, minAge);
+                    setMaxAge(val);
+                    setCurrentIndex(0);
+                    setPhotoIndex(0);
+                  }}
+                  className="w-16 rounded-xl border border-gray-200 px-2 py-1.5 text-xs focus:outline-none focus:border-pink-300"
+                />
+              </div>
+            </div>
+
+            <div>
               <label className="block text-gray-400 font-medium mb-1.5 text-[11px]">Интерес:</label>
               <div className="flex flex-wrap gap-2">
-                {["Все", "Кофе", "Искусство", "ИТ", "Настолки"].map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => {
-                      setSelectedInterest(tag);
-                      setCurrentIndex(0);
-                      setPhotoIndex(0);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
-                      selectedInterest === tag
-                        ? "bg-[#E02868] text-white"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    #{tag}
-                  </button>
-                ))}
+                {interestOptions.length > 1 ? (
+                  interestOptions.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => {
+                        setSelectedInterest(tag);
+                        setCurrentIndex(0);
+                        setPhotoIndex(0);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                        selectedInterest === tag
+                          ? "bg-[#E02868] text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {tag === "Все" ? tag : "#" + tag}
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-gray-300 italic">
+                    Нет данных об интересах в анкетах
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -426,16 +529,18 @@ export default function DiscoverPage() {
                     {currentCandidate.bio}
                   </p>
 
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {currentCandidate.interests.map((tag) => (
-                      <span
-                        key={tag}
-                        className="bg-white/10 text-[11px] px-3 py-1 rounded-xl border border-white/20 font-medium"
-                      >
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
+                  {currentCandidate.interests.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {currentCandidate.interests.map((tag) => (
+                        <span
+                          key={tag}
+                          className="bg-white/10 text-[11px] px-3 py-1 rounded-xl border border-white/20 font-medium"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-center gap-6 pt-4 pointer-events-auto">
                     <button
@@ -459,12 +564,7 @@ export default function DiscoverPage() {
                 <h3 className="text-lg font-black text-gray-900">Анкеты закончились</h3>
                 <p className="text-xs text-gray-400">Попробуйте сбросить фильтры или зайти позже.</p>
                 <button
-                  onClick={() => {
-                    setSelectedCity("Все");
-                    setSelectedInterest("Все");
-                    setCurrentIndex(0);
-                    setPhotoIndex(0);
-                  }}
+                  onClick={resetFilters}
                   className="bg-[#E02868] text-white text-xs font-bold px-6 py-3 rounded-2xl shadow-md hover:bg-pink-600 transition cursor-pointer"
                 >
                   Сбросить фильтры ↺
