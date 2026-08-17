@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
           ],
           generationConfig: {
             temperature: 0.9,
-            maxOutputTokens: 200,
+            maxOutputTokens: 500,
           },
         }),
       }
