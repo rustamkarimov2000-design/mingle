@@ -1,63 +1,65 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { prompt, type } = await req.json();
+    const { type, prompt } = await request.json();
 
-    let systemPrompt = "";
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    switch (type) {
-      case "phrase":
-        systemPrompt =
-          "Ты помощник приложения знакомств. Придумай одно оригинальное первое сообщение девушке. Без банальностей. До 2 предложений.";
-        break;
-
-      case "profile":
-        systemPrompt =
-          "Ты эксперт по знакомствам. Дай один конкретный совет, как улучшить анкету пользователя. До 3 предложений.";
-        break;
-
-      default:
-        systemPrompt =
-          "Ты помощник приложения знакомств Mingle.";
+    if (!apiKey) {
+      return NextResponse.json({
+        text:
+          "AI-помощник временно недоступен: не настроен GEMINI_API_KEY на сервере. " +
+          "Получите бесплатный ключ на aistudio.google.com/apikey и добавьте его в переменные окружения.",
+      });
     }
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-5.5",
-        input: [
-          {
-            role: "system",
-            content: systemPrompt,
+    const systemPrompt =
+      type === "profile"
+        ? "Ты — доброжелательный помощник в приложении знакомств Mingle. Дай один короткий (2-3 предложения), конкретный и позитивный совет, как улучшить анкету пользователя в приложении знакомств. Пиши на русском языке, простым текстом, без markdown и без нумерации."
+        : "Ты — доброжелательный помощник в приложении знакомств Mingle. Придумай одно короткое, живое и ненавязчивое первое сообщение для знакомства в приложении для свиданий (1-2 предложения, можно с лёгким юмором и уместным эмодзи). Пиши на русском языке. Ответь только самим сообщением в кавычках, без пояснений.";
+
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
+        apiKey,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: systemPrompt + "\n\nЗапрос пользователя: " + (prompt || "") }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.9,
+            maxOutputTokens: 200,
           },
-          {
-            role: "user",
-            content: prompt || "",
-          },
-        ],
-      }),
-    });
+        }),
+      }
+    );
 
     const data = await response.json();
 
+    if (!response.ok) {
+      console.error("Ошибка Gemini API:", data);
+      return NextResponse.json({
+        text:
+          "Не удалось получить ответ от AI: " +
+          (data?.error?.message || "неизвестная ошибка API"),
+      });
+    }
+
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "Не удалось получить ответ 😔 Попробуйте ещё раз.";
+
+    return NextResponse.json({ text });
+  } catch (err: any) {
+    console.error("Системная ошибка в /api/ai:", err);
     return NextResponse.json({
-      text:
-        data.output?.[0]?.content?.[0]?.text ??
-        "Не удалось получить ответ.",
+      text: "Произошла ошибка при обращении к AI-помощнику. Попробуйте позже.",
     });
-  } catch (e) {
-    return NextResponse.json(
-      {
-        error: "Ошибка AI",
-      },
-      {
-        status: 500,
-      }
-    );
   }
 }
