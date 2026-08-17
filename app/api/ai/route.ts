@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
         : "Ты — доброжелательный помощник в приложении знакомств Mingle. Придумай одно короткое, живое и ненавязчивое первое сообщение для знакомства в приложении для свиданий (1-2 предложения, можно с лёгким юмором и уместным эмодзи). Пиши на русском языке. Ответь только самим сообщением в кавычках, без пояснений.";
 
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" +
         apiKey,
       {
         method: "POST",
