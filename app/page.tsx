@@ -14,6 +14,7 @@ interface Comment {
   created_at: string;
   authorName: string;
   parent_comment_id: string | null;
+  image_url?: string | null;
 }
 
 interface Post {
@@ -22,6 +23,7 @@ interface Post {
   content: string;
   category: string;
   created_at: string;
+  image_url?: string | null;
   profiles?: {
     name: string;
   };
@@ -79,6 +81,15 @@ export default function HomePage() {
   const [replyingTo, setReplyingTo] = useState<Record<string, string | null>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [submittingReply, setSubmittingReply] = useState<Set<string>>(new Set());
+
+  // Фото для нового поста
+  const [postImageFile, setPostImageFile] = useState<File | null>(null);
+  const [postImagePreview, setPostImagePreview] = useState<string | null>(null);
+  const postImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Фото для комментариев (по postId)
+  const [commentImageFiles, setCommentImageFiles] = useState<Record<string, File | null>>({});
+  const [commentImagePreviews, setCommentImagePreviews] = useState<Record<string, string>>({});
 
   const [repostPostId, setRepostPostId] = useState<string | null>(null);
   const [repostTargets, setRepostTargets] = useState<RepostTarget[]>([]);
@@ -467,7 +478,7 @@ export default function HomePage() {
         supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
         supabase
           .from("post_comments")
-          .select("id, post_id, user_id, content, created_at, parent_comment_id")
+          .select("id, post_id, user_id, content, created_at, parent_comment_id, image_url")
           .in("post_id", postIds)
           .order("created_at", { ascending: true }),
       ]);
@@ -516,6 +527,50 @@ export default function HomePage() {
     }
   }, [isLoaded, fetchPosts]);
 
+  // Универсальная загрузка картинки в Supabase Storage
+  const uploadImageToBucket = async (bucket: string, file: File, folder: string) => {
+    const fileExt = file.name.split(".").pop();
+    const filePath = folder + "/" + Date.now() + "-" + Math.round(Math.random() * 1e6) + "." + fileExt;
+
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+    if (uploadError) throw uploadError;
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(bucket).getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
+  const handlePostImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPostImageFile(file);
+    setPostImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleRemovePostImage = () => {
+    setPostImageFile(null);
+    setPostImagePreview(null);
+    if (postImageInputRef.current) postImageInputRef.current.value = "";
+  };
+
+  const handleCommentImageSelect = (postId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCommentImageFiles((prev) => ({ ...prev, [postId]: file }));
+    setCommentImagePreviews((prev) => ({ ...prev, [postId]: URL.createObjectURL(file) }));
+  };
+
+  const handleRemoveCommentImage = (postId: string) => {
+    setCommentImageFiles((prev) => ({ ...prev, [postId]: null }));
+    setCommentImagePreviews((prev) => {
+      const next = { ...prev };
+      delete next[postId];
+      return next;
+    });
+  };
+
   const handleToggleLike = async (postId: string, isLiked: boolean) => {
     if (!userId) {
       router.push("/auth/login");
@@ -560,7 +615,7 @@ export default function HomePage() {
   };
 
   const handleCreatePost = async () => {
-    if (!postText.trim() || isSubmitting) return;
+    if ((!postText.trim() && !postImageFile) || isSubmitting) return;
 
     if (!userId) {
       router.push("/auth/login");
@@ -569,10 +624,28 @@ export default function HomePage() {
 
     setIsSubmitting(true);
 
+    let imageUrl: string | null = null;
+
+    if (postImageFile) {
+      try {
+        imageUrl = await uploadImageToBucket("post-images", postImageFile, userId);
+      } catch (err: any) {
+        console.error("Ошибка загрузки фото поста:", err);
+        alert(
+          "Не удалось загрузить фото: " +
+            (err?.message || "неизвестная ошибка") +
+            "\n\nПроверьте, что в Supabase создан bucket \"post-images\" (публичный, с разрешением загрузки для авторизованных пользователей)."
+        );
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     const { error } = await supabase.from("posts").insert({
       user_id: userId,
       content: postText.trim(),
       category: selectedCategory,
+      image_url: imageUrl,
     });
 
     if (error) {
@@ -580,6 +653,7 @@ export default function HomePage() {
       alert(`Не удалось опубликовать пост: ${error.message}`);
     } else {
       setPostText("");
+      handleRemovePostImage();
       await fetchPosts();
     }
 
@@ -592,11 +666,35 @@ export default function HomePage() {
     const previousPosts = posts;
     setPosts((prev) => prev.filter((p) => p.id !== postId));
 
-    const { error } = await supabase.from("posts").delete().eq("id", postId);
+    // ВАЖНО: добавляем .select() к delete(), т.к. Supabase НЕ возвращает
+    // ошибку, если RLS-политика молча блокирует удаление — запрос
+    // "успешен", но удаляет 0 строк. .select() возвращает удалённые
+    // строки, поэтому по пустому массиву можно понять, что ничего
+    // на самом деле не удалилось.
+    const { data, error } = await supabase
+      .from("posts")
+      .delete()
+      .eq("id", postId)
+      .select();
 
     if (error) {
       console.error("Ошибка удаления поста:", error);
-      alert("Не удалось удалить пост: " + error.message);
+      alert(
+        "Не удалось удалить пост: " +
+          error.message +
+          (error.code ? " (код: " + error.code + ")" : "")
+      );
+      setPosts(previousPosts);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      console.error("Удаление не затронуло ни одной строки — вероятно, RLS блокирует DELETE.");
+      alert(
+        "Пост не был удалён. Похоже, в Supabase на таблице posts нет DELETE-политики (RLS), которая разрешает автору удалять свой пост.\n\n" +
+          "Добавьте в Supabase → Authentication → Policies → posts политику:\n\n" +
+          "create policy \"Users can delete own posts\"\non posts for delete\nusing (auth.uid() = user_id);"
+      );
       setPosts(previousPosts);
     }
   };
@@ -624,9 +722,31 @@ export default function HomePage() {
     }
 
     const text = (commentDrafts[postId] || "").trim();
-    if (!text) return;
+    const imageFile = commentImageFiles[postId];
+    if (!text && !imageFile) return;
 
     setSubmittingComment((prev) => new Set(prev).add(postId));
+
+    let imageUrl: string | null = null;
+
+    if (imageFile) {
+      try {
+        imageUrl = await uploadImageToBucket("comment-images", imageFile, userId);
+      } catch (err: any) {
+        console.error("Ошибка загрузки фото комментария:", err);
+        alert(
+          "Не удалось загрузить фото: " +
+            (err?.message || "неизвестная ошибка") +
+            "\n\nПроверьте, что в Supabase создан bucket \"comment-images\" (публичный, с разрешением загрузки для авторизованных пользователей)."
+        );
+        setSubmittingComment((prev) => {
+          const next = new Set(prev);
+          next.delete(postId);
+          return next;
+        });
+        return;
+      }
+    }
 
     const { data, error } = await supabase
       .from("post_comments")
@@ -635,6 +755,7 @@ export default function HomePage() {
         user_id: userId,
         content: text,
         parent_comment_id: null,
+        image_url: imageUrl,
       })
       .select()
       .single();
@@ -654,6 +775,7 @@ export default function HomePage() {
       }));
 
       setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+      handleRemoveCommentImage(postId);
     }
 
     setSubmittingComment((prev) => {
@@ -983,13 +1105,45 @@ export default function HomePage() {
                 className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-2 text-xs focus:outline-none focus:border-pink-300"
               />
               <button
+                type="button"
+                onClick={() => postImageInputRef.current?.click()}
+                title="Прикрепить фото"
+                className="text-gray-400 hover:text-pink-500 transition cursor-pointer text-lg shrink-0"
+              >
+                📷
+              </button>
+              <input
+                ref={postImageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePostImageSelect}
+              />
+              <button
                 onClick={handleCreatePost}
-                disabled={isSubmitting || !postText.trim()}
+                disabled={isSubmitting || (!postText.trim() && !postImageFile)}
                 className="bg-[#E02868] hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-2xl transition cursor-pointer shrink-0"
               >
                 {isSubmitting ? "Публикация..." : "Опубликовать"}
               </button>
             </div>
+
+            {postImagePreview && (
+              <div className="relative inline-block">
+                <img
+                  src={postImagePreview}
+                  alt="Превью фото"
+                  className="h-20 w-20 object-cover rounded-xl border border-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleRemovePostImage}
+                  className="absolute -top-2 -right-2 bg-black/70 hover:bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5 text-xs overflow-x-auto">
               <span className="text-gray-400 font-medium text-[10px]">Категория:</span>
@@ -1084,9 +1238,19 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
-                      {post.content}
-                    </p>
+                    {post.content && (
+                      <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
+                        {post.content}
+                      </p>
+                    )}
+
+                    {post.image_url && (
+                      <img
+                        src={post.image_url}
+                        alt=""
+                        className="w-full max-h-[420px] object-cover rounded-2xl border border-gray-100"
+                      />
+                    )}
 
                     <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-2 border-t border-gray-50">
                       <button
@@ -1145,9 +1309,18 @@ export default function HomePage() {
                                             })}
                                           </span>
                                         </div>
-                                        <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
-                                          {comment.content}
-                                        </p>
+                                        {comment.content && (
+                                          <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                            {comment.content}
+                                          </p>
+                                        )}
+                                        {comment.image_url && (
+                                          <img
+                                            src={comment.image_url}
+                                            alt=""
+                                            className="mt-1.5 max-h-40 rounded-xl object-cover border border-gray-100"
+                                          />
+                                        )}
                                       </div>
 
                                       <button
@@ -1220,6 +1393,23 @@ export default function HomePage() {
                           </div>
                         )}
 
+                        {commentImagePreviews[post.id] && (
+                          <div className="relative inline-block">
+                            <img
+                              src={commentImagePreviews[post.id]}
+                              alt="Превью фото"
+                              className="h-16 w-16 object-cover rounded-xl border border-gray-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCommentImage(post.id)}
+                              className="absolute -top-2 -right-2 bg-black/70 hover:bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-2">
                           <input
                             type="text"
@@ -1230,8 +1420,26 @@ export default function HomePage() {
                             className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-2 text-[11px] focus:outline-none focus:border-pink-300"
                           />
                           <button
+                            type="button"
+                            onClick={() => document.getElementById("comment-img-" + post.id)?.click()}
+                            title="Прикрепить фото"
+                            className="text-gray-400 hover:text-pink-500 transition cursor-pointer text-base shrink-0"
+                          >
+                            📷
+                          </button>
+                          <input
+                            id={"comment-img-" + post.id}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleCommentImageSelect(post.id, e)}
+                          />
+                          <button
                             onClick={() => handleAddComment(post.id)}
-                            disabled={isCommentSubmitting || !(commentDrafts[post.id] || "").trim()}
+                            disabled={
+                              isCommentSubmitting ||
+                              (!(commentDrafts[post.id] || "").trim() && !commentImageFiles[post.id])
+                            }
                             className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[11px] font-bold px-3.5 py-2 rounded-2xl transition cursor-pointer shrink-0"
                           >
                             {isCommentSubmitting ? "..." : "Отправить"}
