@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AIAssistantModal from "@/components/AIAssistantModal";
-
+import Script from "next/script";
 interface Comment {
   id: string;
   post_id: string;
@@ -748,6 +748,56 @@ export default function HomePage() {
       fetchPosts();
     }
   }, [isLoaded, fetchPosts]);
+  useEffect(() => {
+    if (isLoaded) {
+      fetchPosts();
+    }
+  }, [isLoaded, fetchPosts]);
+
+  // =========================================================
+  // ВХОД ЧЕРЕЗ TELEGRAM
+  // =========================================================
+
+  const onTelegramAuth = useCallback(async (user: any) => {
+    console.log("Telegram user:", user);
+
+    try {
+      const response = await fetch("/api/auth/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          telegram_id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name || "",
+          username: user.username || "",
+          photo_url: user.photo_url || "",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setUserId(result.user.id);
+        setDisplayName(result.user.name || result.user.first_name || "Пользователь");
+        
+        await fetchPosts();
+        await loadStories();
+        
+        alert("Добро пожаловать, " + (result.user.name || result.user.first_name) + "!");
+      } else {
+        alert("Ошибка входа: " + result.message);
+      }
+    } catch (error) {
+      console.error("Ошибка Telegram авторизации:", error);
+      alert("Не удалось войти через Telegram");
+    }
+  }, [fetchPosts, loadStories]);
+
+  // =========================================================
+  // UPLOAD IMAGE
+  // =========================================================
+
+  const uploadImageToBucket = async (
 
   // =========================================================
   // UPLOAD IMAGE
@@ -1586,12 +1636,27 @@ export default function HomePage() {
               </button>
             </>
           ) : (
-            <Link
-              href="/auth/login"
-              className="text-xs text-white font-bold px-4 py-2 rounded-full bg-pink-600 hover:bg-pink-700 transition"
-            >
-              Войти
-            </Link>
+            <div className="flex items-center gap-2">
+  {/* КНОПКА ВХОДА ЧЕРЕЗ TELEGRAM */}
+  <Script
+    src="https://telegram.org/js/telegram-widget.js?22"
+    strategy="afterInteractive"
+    data-telegram-login="MingleRuBot"
+    data-size="medium"
+    data-request-access="write"
+    data-userpic="false"
+    data-onauth="onTelegramAuth"
+    data-radius="10"
+  />
+  
+  {/* СТАРАЯ КНОПКА ВХОДА ПО ПОЧТЕ (оставляем на всякий случай) */}
+  <Link
+    href="/auth/login"
+    className="text-xs text-white font-bold px-4 py-2 rounded-full bg-pink-600 hover:bg-pink-700 transition"
+  >
+    Войти
+  </Link>
+</div>
           )}
         </div>
       </header>
