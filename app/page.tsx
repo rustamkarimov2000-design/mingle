@@ -74,7 +74,7 @@ export default function HomePage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
 
-  // Уведомления
+  // 🔔 Количество непрочитанных уведомлений
   const [notificationsCount, setNotificationsCount] = useState(0);
 
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
@@ -85,12 +85,10 @@ export default function HomePage() {
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [submittingReply, setSubmittingReply] = useState<Set<string>>(new Set());
 
-  // Фото для нового поста
   const [postImageFile, setPostImageFile] = useState<File | null>(null);
   const [postImagePreview, setPostImagePreview] = useState<string | null>(null);
   const postImageInputRef = useRef<HTMLInputElement>(null);
 
-  // Фото для комментариев
   const [commentImageFiles, setCommentImageFiles] = useState<Record<string, File | null>>({});
   const [commentImagePreviews, setCommentImagePreviews] = useState<Record<string, string>>({});
 
@@ -131,7 +129,9 @@ export default function HomePage() {
         .single();
 
       setDisplayName(
-        profile?.name || authUser.email?.split("@")[0] || "Пользователь"
+        profile?.name ||
+          authUser.email?.split("@")[0] ||
+          "Пользователь"
       );
 
       setIsLoaded(true);
@@ -139,9 +139,7 @@ export default function HomePage() {
 
     loadUser();
 
-    const {
-      data: listener,
-    } = supabase.auth.onAuthStateChange(() => {
+    const { data: listener } = supabase.auth.onAuthStateChange(() => {
       loadUser();
     });
 
@@ -235,7 +233,7 @@ export default function HomePage() {
   }, [userId]);
 
   // =========================================================
-  // ВХОДЯЩИЕ ЛАЙКИ
+  // ЛАЙКИ
   // =========================================================
 
   useEffect(() => {
@@ -279,7 +277,7 @@ export default function HomePage() {
   }, [userId]);
 
   // =========================================================
-  // УВЕДОМЛЕНИЯ
+  // 🔔 УВЕДОМЛЕНИЯ
   // =========================================================
 
   useEffect(() => {
@@ -316,15 +314,10 @@ export default function HomePage() {
           event: "INSERT",
           schema: "public",
           table: "notifications",
+          filter: `user_id=eq.${userId}`,
         },
-        (payload) => {
-          const notification = payload.new as {
-            user_id: string;
-          };
-
-          if (notification.user_id === userId) {
-            setNotificationsCount((prev) => prev + 1);
-          }
+        () => {
+          setNotificationsCount((prev) => prev + 1);
         }
       )
       .subscribe();
@@ -559,6 +552,7 @@ export default function HomePage() {
 
     const stepMs = 100;
     const steps = STORY_DURATION_MS / stepMs;
+
     let currentStep = 0;
 
     progressIntervalRef.current = setInterval(() => {
@@ -639,9 +633,7 @@ export default function HomePage() {
         new Set(postsData.map((p) => p.user_id))
       );
 
-      const postIds = postsData.map(
-        (p) => p.id
-      );
+      const postIds = postsData.map((p) => p.id);
 
       const [
         profilesRes,
@@ -676,38 +668,33 @@ export default function HomePage() {
         ])
       );
 
-      const likesData =
-        likesRes.data || [];
-
-      const commentsData =
-        commentsRes.data || [];
+      const likesData = likesRes.data || [];
+      const commentsData = commentsRes.data || [];
 
       const commenterIds = Array.from(
         new Set(
-          commentsData.map(
-            (c) => c.user_id
-          )
+          commentsData.map((c) => c.user_id)
         )
       );
 
-      const {
-        data: commenterProfiles,
-      } = commenterIds.length
-        ? await supabase
-            .from("profiles")
-            .select("id, name")
-            .in("id", commenterIds)
-        : {
-            data: [] as {
-              id: string;
-              name: string;
-            }[],
-          };
+      const { data: commenterProfiles } =
+        commenterIds.length
+          ? await supabase
+              .from("profiles")
+              .select("id, name")
+              .in("id", commenterIds)
+          : {
+              data: [] as {
+                id: string;
+                name: string;
+              }[],
+            };
 
       const commenterMap = new Map(
-        (commenterProfiles || []).map(
-          (p) => [p.id, p.name]
-        )
+        (commenterProfiles || []).map((p) => [
+          p.id,
+          p.name,
+        ])
       );
 
       const commentsMap: Record<
@@ -719,18 +706,15 @@ export default function HomePage() {
         const enriched: Comment = {
           ...c,
           authorName:
-            commenterMap.get(
-              c.user_id
-            ) || "Пользователь",
+            commenterMap.get(c.user_id) ||
+            "Пользователь",
         };
 
         if (!commentsMap[c.post_id]) {
           commentsMap[c.post_id] = [];
         }
 
-        commentsMap[c.post_id].push(
-          enriched
-        );
+        commentsMap[c.post_id].push(enriched);
       });
 
       setCommentsByPost(commentsMap);
@@ -740,15 +724,12 @@ export default function HomePage() {
           ...post,
           profiles: {
             name:
-              profilesMap.get(
-                post.user_id
-              ) || "Пользователь",
+              profilesMap.get(post.user_id) ||
+              "Пользователь",
           },
-          post_likes:
-            likesData.filter(
-              (l) =>
-                l.post_id === post.id
-            ),
+          post_likes: likesData.filter(
+            (l) => l.post_id === post.id
+          ),
         }));
 
       setPosts(formattedPosts);
@@ -769,7 +750,7 @@ export default function HomePage() {
   }, [isLoaded, fetchPosts]);
 
   // =========================================================
-  // ЗАГРУЗКА ФОТО
+  // UPLOAD IMAGE
   // =========================================================
 
   const uploadImageToBucket = async (
@@ -777,8 +758,7 @@ export default function HomePage() {
     file: File,
     folder: string
   ) => {
-    const fileExt =
-      file.name.split(".").pop();
+    const fileExt = file.name.split(".").pop();
 
     const filePath =
       folder +
@@ -789,11 +769,10 @@ export default function HomePage() {
       "." +
       fileExt;
 
-    const {
-      error: uploadError,
-    } = await supabase.storage
-      .from(bucket)
-      .upload(filePath, file);
+    const { error: uploadError } =
+      await supabase.storage
+        .from(bucket)
+        .upload(filePath, file);
 
     if (uploadError) throw uploadError;
 
@@ -865,7 +844,7 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // ЛАЙК ПОСТА
+  // POST LIKE
   // =========================================================
 
   const handleToggleLike = async (
@@ -890,9 +869,7 @@ export default function HomePage() {
               )
             : [
                 ...currentLikes,
-                {
-                  user_id: userId,
-                },
+                { user_id: userId },
               ];
 
           return {
@@ -907,22 +884,20 @@ export default function HomePage() {
 
     try {
       if (isLiked) {
-        const { error } =
-          await supabase
-            .from("post_likes")
-            .delete()
-            .eq("post_id", postId)
-            .eq("user_id", userId);
+        const { error } = await supabase
+          .from("post_likes")
+          .delete()
+          .eq("post_id", postId)
+          .eq("user_id", userId);
 
         if (error) throw error;
       } else {
-        const { error } =
-          await supabase
-            .from("post_likes")
-            .insert({
-              post_id: postId,
-              user_id: userId,
-            });
+        const { error } = await supabase
+          .from("post_likes")
+          .insert({
+            post_id: postId,
+            user_id: userId,
+          });
 
         if (error) throw error;
       }
@@ -937,13 +912,12 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // СОЗДАНИЕ ПОСТА
+  // CREATE POST
   // =========================================================
 
   const handleCreatePost = async () => {
     if (
-      (!postText.trim() &&
-        !postImageFile) ||
+      (!postText.trim() && !postImageFile) ||
       isSubmitting
     ) {
       return;
@@ -960,12 +934,11 @@ export default function HomePage() {
 
     if (postImageFile) {
       try {
-        imageUrl =
-          await uploadImageToBucket(
-            "post-images",
-            postImageFile,
-            userId
-          );
+        imageUrl = await uploadImageToBucket(
+          "post-images",
+          postImageFile,
+          userId
+        );
       } catch (err: any) {
         console.error(
           "Ошибка загрузки фото поста:",
@@ -984,8 +957,9 @@ export default function HomePage() {
       }
     }
 
-    const { error } =
-      await supabase.from("posts").insert({
+    const { error } = await supabase
+      .from("posts")
+      .insert({
         user_id: userId,
         content: postText.trim(),
         category: selectedCategory,
@@ -1003,9 +977,7 @@ export default function HomePage() {
       );
     } else {
       setPostText("");
-
       handleRemovePostImage();
-
       await fetchPosts();
     }
 
@@ -1013,7 +985,7 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // УДАЛЕНИЕ ПОСТА
+  // DELETE POST
   // =========================================================
 
   const handleDeletePost = async (
@@ -1030,15 +1002,10 @@ export default function HomePage() {
     const previousPosts = posts;
 
     setPosts((prev) =>
-      prev.filter(
-        (p) => p.id !== postId
-      )
+      prev.filter((p) => p.id !== postId)
     );
 
-    const {
-      data,
-      error,
-    } = await supabase
+    const { data, error } = await supabase
       .from("posts")
       .delete()
       .eq("id", postId)
@@ -1054,9 +1021,7 @@ export default function HomePage() {
         "Не удалось удалить пост: " +
           error.message +
           (error.code
-            ? " (код: " +
-              error.code +
-              ")"
+            ? " (код: " + error.code + ")"
             : "")
       );
 
@@ -1070,9 +1035,7 @@ export default function HomePage() {
       );
 
       alert(
-        "Пост не был удалён. Похоже, в Supabase на таблице posts нет DELETE-политики (RLS), которая разрешает автору удалять свой пост.\n\n" +
-          "Добавьте в Supabase → Authentication → Policies → posts политику:\n\n" +
-          'create policy "Users can delete own posts"\non posts for delete\nusing (auth.uid() = user_id);'
+        "Пост не был удалён. Похоже, в Supabase на таблице posts нет DELETE-политики."
       );
 
       setPosts(previousPosts);
@@ -1080,7 +1043,7 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // КОММЕНТАРИИ
+  // COMMENTS
   // =========================================================
 
   const toggleComments = (
@@ -1153,34 +1116,28 @@ export default function HomePage() {
               "неизвестная ошибка")
         );
 
-        setSubmittingComment(
-          (prev) => {
-            const next = new Set(prev);
-
-            next.delete(postId);
-
-            return next;
-          }
-        );
+        setSubmittingComment((prev) => {
+          const next = new Set(prev);
+          next.delete(postId);
+          return next;
+        });
 
         return;
       }
     }
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("post_comments")
-      .insert({
-        post_id: postId,
-        user_id: userId,
-        content: text,
-        parent_comment_id: null,
-        image_url: imageUrl,
-      })
-      .select()
-      .single();
+    const { data, error } =
+      await supabase
+        .from("post_comments")
+        .insert({
+          post_id: postId,
+          user_id: userId,
+          content: text,
+          parent_comment_id: null,
+          image_url: imageUrl,
+        })
+        .select()
+        .single();
 
     if (error) {
       console.error(
@@ -1216,9 +1173,7 @@ export default function HomePage() {
 
     setSubmittingComment((prev) => {
       const next = new Set(prev);
-
       next.delete(postId);
-
       return next;
     });
   };
@@ -1279,20 +1234,18 @@ export default function HomePage() {
         )
     );
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("post_comments")
-      .insert({
-        post_id: postId,
-        user_id: userId,
-        content: text,
-        parent_comment_id:
-          parentCommentId,
-      })
-      .select()
-      .single();
+    const { data, error } =
+      await supabase
+        .from("post_comments")
+        .insert({
+          post_id: postId,
+          user_id: userId,
+          content: text,
+          parent_comment_id:
+            parentCommentId,
+        })
+        .select()
+        .single();
 
     if (error) {
       console.error(
@@ -1339,7 +1292,7 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // РЕПОСТ
+  // REPOST
   // =========================================================
 
   const openRepostModal = async (
@@ -1394,10 +1347,9 @@ export default function HomePage() {
       return;
     }
 
-    const matchIds =
-      matchRows.map(
-        (m) => m.matchId
-      );
+    const matchIds = matchRows.map(
+      (m) => m.matchId
+    );
 
     const otherUserIds =
       matchRows.map(
@@ -1438,10 +1390,7 @@ export default function HomePage() {
                 row.otherUserId
             );
 
-          if (
-            !conversation ||
-            !profile
-          ) {
+          if (!conversation || !profile) {
             return null;
           }
 
@@ -1471,10 +1420,7 @@ export default function HomePage() {
   const handleSendRepost = async (
     target: RepostTarget
   ) => {
-    if (
-      !userId ||
-      !repostPostId
-    ) {
+    if (!userId || !repostPostId) {
       return;
     }
 
@@ -1484,9 +1430,7 @@ export default function HomePage() {
 
     if (!post) return;
 
-    setSendingRepostTo(
-      target.matchId
-    );
+    setSendingRepostTo(target.matchId);
 
     const excerpt =
       post.content.length > 120
@@ -1512,8 +1456,7 @@ export default function HomePage() {
           conversation_id:
             target.conversationId,
           sender_id: userId,
-          content:
-            messageContent,
+          content: messageContent,
         });
 
     if (error) {
@@ -1539,7 +1482,7 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // ВЫХОД
+  // LOGOUT
   // =========================================================
 
   const handleLogout = async () => {
@@ -1556,29 +1499,30 @@ export default function HomePage() {
 
   const activeGroup =
     viewerGroupIndex !== null
-      ? storyGroups[
-          viewerGroupIndex
-        ]
+      ? storyGroups[viewerGroupIndex]
       : null;
 
-  const activeStory =
-    activeGroup
-      ? activeGroup.stories[
-          viewerStoryIndex
-        ]
-      : null;
+  const activeStory = activeGroup
+    ? activeGroup.stories[
+        viewerStoryIndex
+      ]
+    : null;
 
-  const repostPost =
-    repostPostId
-      ? posts.find(
-          (p) =>
-            p.id === repostPostId
-        )
-      : null;
+  const repostPost = repostPostId
+    ? posts.find(
+        (p) => p.id === repostPostId
+      )
+    : null;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12">
+
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
+
       <header className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+
         <div className="flex items-center gap-3">
           <span className="font-logo text-xl text-gray-900">
             mingle
@@ -1590,6 +1534,28 @@ export default function HomePage() {
         </div>
 
         <div className="flex items-center gap-3">
+
+          {/* 🔔 УВЕДОМЛЕНИЯ */}
+          {userId && (
+            <Link
+              href="/notifications"
+              title="Уведомления"
+              className="relative w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition cursor-pointer"
+            >
+              <span className="text-lg">
+                🔔
+              </span>
+
+              {notificationsCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-pink-600 text-white text-[9px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center border-2 border-[#F8F9FA]">
+                  {notificationsCount > 9
+                    ? "9+"
+                    : notificationsCount}
+                </span>
+              )}
+            </Link>
+          )}
+
           {displayName !== "Гость" ? (
             <>
               <span className="text-xs text-gray-400 hidden sm:inline">
@@ -1604,10 +1570,7 @@ export default function HomePage() {
                 className="flex items-center bg-gray-100 hover:bg-gray-200 rounded-full p-1 text-xs font-bold transition cursor-pointer"
               >
                 <span className="bg-pink-500 text-white px-2.5 py-1 rounded-full uppercase text-[10px]">
-                  {displayName.slice(
-                    0,
-                    2
-                  )}
+                  {displayName.slice(0, 2)}
                 </span>
 
                 <span className="px-3 text-gray-800 uppercase tracking-wider">
@@ -1633,11 +1596,16 @@ export default function HomePage() {
         </div>
       </header>
 
+      {/* =====================================================
+          MAIN
+      ===================================================== */}
+
       <main className="max-w-7xl mx-auto px-6 pt-4 grid grid-cols-12 gap-6">
 
         {/* ЛЕВОЕ МЕНЮ */}
 
         <aside className="col-span-12 md:col-span-3 space-y-2">
+
           <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-100 space-y-1.5 sticky top-4">
 
             <Link
@@ -1674,25 +1642,6 @@ export default function HomePage() {
                   {likesCount > 9
                     ? "9+"
                     : likesCount}
-                </span>
-              )}
-            </Link>
-
-            {/* УВЕДОМЛЕНИЯ */}
-
-            <Link
-              href="/notifications"
-              className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
-            >
-              <span className="flex items-center gap-3.5">
-                🔔 Уведомления
-              </span>
-
-              {notificationsCount > 0 && (
-                <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
-                  {notificationsCount > 9
-                    ? "9+"
-                    : notificationsCount}
                 </span>
               )}
             </Link>
@@ -1738,8 +1687,11 @@ export default function HomePage() {
           {/* ИСТОРИИ */}
 
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
+
             <div className="flex items-center justify-between">
+
               <div className="flex items-center gap-2">
+
                 <span className="text-sm">
                   📸
                 </span>
@@ -1747,11 +1699,13 @@ export default function HomePage() {
                 <h3 className="text-xs font-black uppercase tracking-wider text-gray-900">
                   ИСТОРИИ
                 </h3>
+
               </div>
 
               <span className="text-[10px] text-gray-400 font-medium">
                 Свежее
               </span>
+
             </div>
 
             <div className="flex items-center gap-3 overflow-x-auto pb-1">
@@ -1786,9 +1740,7 @@ export default function HomePage() {
               {storyGroups.map(
                 (group, idx) => (
                   <div
-                    key={
-                      group.userId
-                    }
+                    key={group.userId}
                     onClick={() =>
                       openViewer(idx)
                     }
@@ -1796,12 +1748,8 @@ export default function HomePage() {
                   >
                     <div className="w-11 h-11 rounded-full p-[2px] bg-gradient-to-tr from-pink-500 to-purple-500">
                       <img
-                        src={
-                          group.avatar
-                        }
-                        alt={
-                          group.name
-                        }
+                        src={group.avatar}
+                        alt={group.name}
                         className="w-full h-full object-cover rounded-full"
                       />
                     </div>
@@ -1826,13 +1774,13 @@ export default function HomePage() {
           {/* СОЗДАНИЕ ПОСТА */}
 
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
+
             <div className="flex items-center gap-3">
 
               <div className="w-9 h-9 rounded-full bg-pink-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
-                {displayName.slice(
-                  0,
-                  2
-                ).toUpperCase()}
+                {displayName
+                  .slice(0, 2)
+                  .toUpperCase()}
               </div>
 
               <input
@@ -1873,9 +1821,7 @@ export default function HomePage() {
               />
 
               <button
-                onClick={
-                  handleCreatePost
-                }
+                onClick={handleCreatePost}
                 disabled={
                   isSubmitting ||
                   (!postText.trim() &&
@@ -1893,9 +1839,7 @@ export default function HomePage() {
             {postImagePreview && (
               <div className="relative inline-block">
                 <img
-                  src={
-                    postImagePreview
-                  }
+                  src={postImagePreview}
                   alt="Превью фото"
                   className="h-20 w-20 object-cover rounded-xl border border-gray-100"
                 />
@@ -1913,6 +1857,7 @@ export default function HomePage() {
             )}
 
             <div className="flex items-center gap-1.5 text-xs overflow-x-auto">
+
               <span className="text-gray-400 font-medium text-[10px]">
                 Категория:
               </span>
@@ -1940,14 +1885,16 @@ export default function HomePage() {
                   {cat}
                 </button>
               ))}
+
             </div>
           </div>
 
-          {/* ФИЛЬТРЫ ЛЕНТЫ */}
+          {/* ФИЛЬТРЫ */}
 
           <div className="space-y-4 pt-2">
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
+
               {[
                 {
                   name: "Все",
@@ -1986,19 +1933,18 @@ export default function HomePage() {
                 >
                   <span>
                     {f.icon}
-                  </span>
-
+                  </span>{" "}
                   {f.name}
                 </button>
               ))}
+
             </div>
 
             {isLoadingPosts ? (
               <div className="bg-white rounded-3xl p-8 text-center text-xs text-gray-400 border border-gray-100">
                 Загрузка ленты...
               </div>
-            ) : posts.length ===
-              0 ? (
+            ) : posts.length === 0 ? (
               <div className="bg-white rounded-3xl p-8 text-center text-xs text-gray-400 border border-gray-100 space-y-1">
                 <p className="font-bold text-gray-600 text-sm">
                   В этой категории пока нет постов 💭
@@ -2012,10 +1958,8 @@ export default function HomePage() {
               posts.map((post) => {
 
                 const isLiked =
-                  (
-                    post.post_likes ||
-                    []
-                  ).some(
+                  (post.post_likes ||
+                    []).some(
                     (like) =>
                       like.user_id ===
                       userId
@@ -2071,14 +2015,17 @@ export default function HomePage() {
 
                         <div className="w-10 h-10 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs uppercase">
                           {(
-                            post.profiles?.name ||
+                            post.profiles
+                              ?.name ||
                             "П"
                           ).slice(0, 2)}
                         </div>
 
                         <div>
+
                           <h4 className="text-xs font-black text-gray-900">
-                            {post.profiles?.name ||
+                            {post.profiles
+                              ?.name ||
                               "Пользователь"}
                           </h4>
 
@@ -2089,13 +2036,12 @@ export default function HomePage() {
                               [],
                               {
                                 hour: "2-digit",
-                                minute:
-                                  "2-digit",
+                                minute: "2-digit",
                               }
                             )}
                           </span>
-                        </div>
 
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -2129,9 +2075,7 @@ export default function HomePage() {
 
                     {post.image_url && (
                       <img
-                        src={
-                          post.image_url
-                        }
+                        src={post.image_url}
                         alt=""
                         className="w-full max-h-[420px] object-cover rounded-2xl border border-gray-100"
                       />
@@ -2247,8 +2191,11 @@ export default function HomePage() {
                                         <div className="bg-gray-50 rounded-2xl px-3 py-2">
 
                                           <div className="flex items-baseline gap-2">
+
                                             <span className="text-[11px] font-bold text-gray-900">
-                                              {comment.authorName}
+                                              {
+                                                comment.authorName
+                                              }
                                             </span>
 
                                             <span className="text-[9px] text-gray-400">
@@ -2258,16 +2205,18 @@ export default function HomePage() {
                                                 [],
                                                 {
                                                   hour: "2-digit",
-                                                  minute:
-                                                    "2-digit",
+                                                  minute: "2-digit",
                                                 }
                                               )}
                                             </span>
+
                                           </div>
 
                                           {comment.content && (
                                             <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
-                                              {comment.content}
+                                              {
+                                                comment.content
+                                              }
                                             </p>
                                           )}
 
@@ -2325,8 +2274,11 @@ export default function HomePage() {
                                                   <div className="bg-gray-50 rounded-2xl px-3 py-1.5 flex-1">
 
                                                     <div className="flex items-baseline gap-2">
+
                                                       <span className="text-[10px] font-bold text-gray-900">
-                                                        {reply.authorName}
+                                                        {
+                                                          reply.authorName
+                                                        }
                                                       </span>
 
                                                       <span className="text-[9px] text-gray-400">
@@ -2336,11 +2288,11 @@ export default function HomePage() {
                                                           [],
                                                           {
                                                             hour: "2-digit",
-                                                            minute:
-                                                              "2-digit",
+                                                            minute: "2-digit",
                                                           }
                                                         )}
                                                       </span>
+
                                                     </div>
 
                                                     <p className="text-[10px] text-gray-700 mt-0.5 whitespace-pre-wrap">
@@ -2350,6 +2302,7 @@ export default function HomePage() {
                                                     </p>
 
                                                   </div>
+
                                                 </div>
                                               )
                                             )}
@@ -2365,15 +2318,15 @@ export default function HomePage() {
                                               value={
                                                 replyDrafts[
                                                   comment.id
-                                                ] || ""
+                                                ] ||
+                                                ""
                                               }
                                               onChange={(
                                                 e
                                               ) =>
                                                 handleReplyDraftChange(
                                                   comment.id,
-                                                  e.target
-                                                    .value
+                                                  e.target.value
                                                 )
                                               }
                                               onKeyDown={(
@@ -2421,6 +2374,7 @@ export default function HomePage() {
                                         )}
 
                                       </div>
+
                                     </div>
 
                                   </div>
@@ -2477,7 +2431,8 @@ export default function HomePage() {
                               )
                             }
                             onKeyDown={(e) =>
-                              e.key === "Enter" &&
+                              e.key ===
+                                "Enter" &&
                               handleAddComment(
                                 post.id
                               )
@@ -2549,6 +2504,7 @@ export default function HomePage() {
                 );
               })
             )}
+
           </div>
         </section>
 
@@ -2576,9 +2532,7 @@ export default function HomePage() {
 
             <button
               onClick={() =>
-                setIsAIModalOpen(
-                  true
-                )
+                setIsAIModalOpen(true)
               }
               className="w-full bg-white/30 hover:bg-white/40 text-white font-bold py-2.5 rounded-xl text-xs backdrop-blur-md transition cursor-pointer text-center"
             >
@@ -2588,6 +2542,7 @@ export default function HomePage() {
           </div>
 
         </aside>
+
       </main>
 
       <AIAssistantModal
@@ -2597,130 +2552,121 @@ export default function HomePage() {
         }
       />
 
-      {/* ПРОСМОТР ИСТОРИИ */}
+      {/* =====================================================
+          STORY VIEWER
+      ===================================================== */}
 
-      {activeGroup &&
-        activeStory && (
-          <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+      {activeGroup && activeStory && (
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
 
-            <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
+          <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
 
-              <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
+            <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
 
-                {activeGroup.stories.map(
-                  (s, idx) => (
+              {activeGroup.stories.map(
+                (s, idx) => (
+                  <div
+                    key={s.id}
+                    className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden"
+                  >
                     <div
-                      key={s.id}
-                      className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden"
-                    >
-                      <div
-                        className="h-full bg-white"
-                        style={{
-                          width:
-                            idx <
-                            viewerStoryIndex
-                              ? "100%"
-                              : idx ===
-                                viewerStoryIndex
-                              ? viewerProgress +
-                                "%"
-                              : "0%",
-                          transition:
-                            idx ===
-                            viewerStoryIndex
-                              ? "none"
-                              : undefined,
-                        }}
-                      />
-                    </div>
-                  )
-                )}
+                      className="h-full bg-white"
+                      style={{
+                        width:
+                          idx <
+                          viewerStoryIndex
+                            ? "100%"
+                            : idx ===
+                              viewerStoryIndex
+                            ? viewerProgress +
+                              "%"
+                            : "0%",
 
-              </div>
-
-              <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
-
-                <div className="flex items-center gap-2">
-
-                  <img
-                    src={
-                      activeGroup.avatar
-                    }
-                    alt={
-                      activeGroup.name
-                    }
-                    className="w-8 h-8 rounded-full object-cover border border-white/50"
-                  />
-
-                  <span className="text-white text-xs font-bold drop-shadow">
-                    {activeGroup.name}
-                  </span>
-
-                </div>
-
-                <button
-                  onClick={
-                    closeViewer
-                  }
-                  className="text-white text-xl font-bold px-2 drop-shadow cursor-pointer"
-                >
-                  ✕
-                </button>
-
-              </div>
-
-              <div className="w-full h-full flex items-center justify-center">
-
-                {activeStory.media_type ===
-                "video" ? (
-                  <video
-                    key={
-                      activeStory.id
-                    }
-                    src={
-                      activeStory.media_url
-                    }
-                    className="w-full h-full object-contain"
-                    autoPlay
-                    playsInline
-                    onEnded={
-                      goToNextStory
-                    }
-                  />
-                ) : (
-                  <img
-                    key={
-                      activeStory.id
-                    }
-                    src={
-                      activeStory.media_url
-                    }
-                    alt=""
-                    className="w-full h-full object-contain"
-                  />
-                )}
-
-              </div>
-
-              <div
-                onClick={
-                  goToPrevStory
-                }
-                className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
-              />
-
-              <div
-                onClick={
-                  goToNextStory
-                }
-                className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
-              />
+                        transition:
+                          idx ===
+                          viewerStoryIndex
+                            ? "none"
+                            : undefined,
+                      }}
+                    />
+                  </div>
+                )
+              )}
 
             </div>
-          </div>
-        )}
 
-      {/* РЕПОСТ */}
+            <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
+
+              <div className="flex items-center gap-2">
+
+                <img
+                  src={activeGroup.avatar}
+                  alt={activeGroup.name}
+                  className="w-8 h-8 rounded-full object-cover border border-white/50"
+                />
+
+                <span className="text-white text-xs font-bold drop-shadow">
+                  {activeGroup.name}
+                </span>
+
+              </div>
+
+              <button
+                onClick={closeViewer}
+                className="text-white text-xl font-bold px-2 drop-shadow cursor-pointer"
+              >
+                ✕
+              </button>
+
+            </div>
+
+            <div className="w-full h-full flex items-center justify-center">
+
+              {activeStory.media_type ===
+              "video" ? (
+                <video
+                  key={activeStory.id}
+                  src={
+                    activeStory.media_url
+                  }
+                  className="w-full h-full object-contain"
+                  autoPlay
+                  playsInline
+                  onEnded={
+                    goToNextStory
+                  }
+                />
+              ) : (
+                <img
+                  key={activeStory.id}
+                  src={
+                    activeStory.media_url
+                  }
+                  alt=""
+                  className="w-full h-full object-contain"
+                />
+              )}
+
+            </div>
+
+            <div
+              onClick={goToPrevStory}
+              className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+            />
+
+            <div
+              onClick={goToNextStory}
+              className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+            />
+
+          </div>
+
+        </div>
+      )}
+
+      {/* =====================================================
+          REPOST MODAL
+      ===================================================== */}
 
       {repostPostId &&
         repostPost && (
@@ -2758,9 +2704,7 @@ export default function HomePage() {
               <div className="p-4 bg-gray-50 border-b border-gray-100">
 
                 <p className="text-[11px] text-gray-500 line-clamp-2">
-                  {
-                    repostPost.content
-                  }
+                  {repostPost.content}
                 </p>
 
               </div>
@@ -2779,6 +2723,7 @@ export default function HomePage() {
                 ) : (
                   repostTargets.map(
                     (target) => {
+
                       const isSent =
                         repostSentTo.has(
                           target.matchId
@@ -2809,7 +2754,9 @@ export default function HomePage() {
                             />
 
                             <span className="text-xs font-bold text-gray-900">
-                              {target.name}
+                              {
+                                target.name
+                              }
                             </span>
 
                           </div>
@@ -2846,6 +2793,7 @@ export default function HomePage() {
               </div>
 
             </div>
+
           </div>
         )}
 
