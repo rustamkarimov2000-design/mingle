@@ -74,6 +74,9 @@ export default function HomePage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
 
+  // Уведомления
+  const [notificationsCount, setNotificationsCount] = useState(0);
+
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -87,7 +90,7 @@ export default function HomePage() {
   const [postImagePreview, setPostImagePreview] = useState<string | null>(null);
   const postImageInputRef = useRef<HTMLInputElement>(null);
 
-  // Фото для комментариев (по postId)
+  // Фото для комментариев
   const [commentImageFiles, setCommentImageFiles] = useState<Record<string, File | null>>({});
   const [commentImagePreviews, setCommentImagePreviews] = useState<Record<string, string>>({});
 
@@ -108,7 +111,9 @@ export default function HomePage() {
 
   useEffect(() => {
     const loadUser = async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
 
       if (!authUser) {
         setDisplayName("Гость");
@@ -125,13 +130,18 @@ export default function HomePage() {
         .eq("id", authUser.id)
         .single();
 
-      setDisplayName(profile?.name || authUser.email?.split("@")[0] || "Пользователь");
+      setDisplayName(
+        profile?.name || authUser.email?.split("@")[0] || "Пользователь"
+      );
+
       setIsLoaded(true);
     };
 
     loadUser();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(() => {
+    const {
+      data: listener,
+    } = supabase.auth.onAuthStateChange(() => {
       loadUser();
     });
 
@@ -139,6 +149,10 @@ export default function HomePage() {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  // =========================================================
+  // НЕПРОЧИТАННЫЕ СООБЩЕНИЯ
+  // =========================================================
 
   useEffect(() => {
     if (!userId) return;
@@ -194,9 +208,17 @@ export default function HomePage() {
       .channel("home_unread_messages")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
         (payload) => {
-          const newMsg = payload.new as { conversation_id: string; sender_id: string };
+          const newMsg = payload.new as {
+            conversation_id: string;
+            sender_id: string;
+          };
+
           if (
             newMsg.sender_id !== userId &&
             conversationIds.includes(newMsg.conversation_id)
@@ -211,6 +233,10 @@ export default function HomePage() {
       supabase.removeChannel(channel);
     };
   }, [userId]);
+
+  // =========================================================
+  // ВХОДЯЩИЕ ЛАЙКИ
+  // =========================================================
 
   useEffect(() => {
     if (!userId) return;
@@ -230,9 +256,16 @@ export default function HomePage() {
       .channel("home_incoming_likes")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "likes" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "likes",
+        },
         (payload) => {
-          const newLike = payload.new as { to_user_id: string };
+          const newLike = payload.new as {
+            to_user_id: string;
+          };
+
           if (newLike.to_user_id === userId) {
             setLikesCount((prev) => prev + 1);
           }
@@ -245,10 +278,72 @@ export default function HomePage() {
     };
   }, [userId]);
 
+  // =========================================================
+  // УВЕДОМЛЕНИЯ
+  // =========================================================
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const loadNotificationsCount = async () => {
+      const { count, error } = await supabase
+        .from("notifications")
+        .select("id", {
+          count: "exact",
+          head: true,
+        })
+        .eq("user_id", userId)
+        .eq("is_read", false);
+
+      if (error) {
+        console.error(
+          "Ошибка загрузки количества уведомлений:",
+          error
+        );
+        return;
+      }
+
+      setNotificationsCount(count || 0);
+    };
+
+    loadNotificationsCount();
+
+    const channel = supabase
+      .channel("home_notifications")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+        },
+        (payload) => {
+          const notification = payload.new as {
+            user_id: string;
+          };
+
+          if (notification.user_id === userId) {
+            setNotificationsCount((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  // =========================================================
+  // STORIES
+  // =========================================================
+
   const loadStories = useCallback(async () => {
     const { data: storiesData, error } = await supabase
       .from("stories")
-      .select("id, user_id, media_url, media_type, created_at")
+      .select(
+        "id, user_id, media_url, media_type, created_at"
+      )
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false });
 
@@ -262,7 +357,9 @@ export default function HomePage() {
       return;
     }
 
-    const userIds = Array.from(new Set(storiesData.map((s) => s.user_id)));
+    const userIds = Array.from(
+      new Set(storiesData.map((s) => s.user_id))
+    );
 
     const { data: profilesData } = await supabase
       .from("profiles")
@@ -277,6 +374,7 @@ export default function HomePage() {
 
     storiesData.forEach((story) => {
       const profile = profilesMap.get(story.user_id);
+
       if (!profile) return;
 
       if (!groupsMap.has(story.user_id)) {
@@ -296,7 +394,9 @@ export default function HomePage() {
 
     groupsMap.forEach((group) => {
       group.stories.sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        (a, b) =>
+          new Date(a.created_at).getTime() -
+          new Date(b.created_at).getTime()
       );
     });
 
@@ -313,8 +413,11 @@ export default function HomePage() {
     storyFileInputRef.current?.click();
   };
 
-  const handleStoryFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStoryFileSelected = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
+
     if (!file || !userId) return;
 
     const isVideo = file.type.startsWith("video/");
@@ -324,7 +427,8 @@ export default function HomePage() {
       setIsUploadingStory(true);
 
       const fileExt = file.name.split(".").pop();
-      const filePath = userId + "/" + Date.now() + "." + fileExt;
+      const filePath =
+        userId + "/" + Date.now() + "." + fileExt;
 
       const { error: uploadError } = await supabase.storage
         .from("stories")
@@ -334,22 +438,31 @@ export default function HomePage() {
 
       const {
         data: { publicUrl },
-      } = supabase.storage.from("stories").getPublicUrl(filePath);
+      } = supabase.storage
+        .from("stories")
+        .getPublicUrl(filePath);
 
-      const { error: insertError } = await supabase.from("stories").insert({
-        user_id: userId,
-        media_url: publicUrl,
-        media_type: mediaType,
-      });
+      const { error: insertError } = await supabase
+        .from("stories")
+        .insert({
+          user_id: userId,
+          media_url: publicUrl,
+          media_type: mediaType,
+        });
 
       if (insertError) throw insertError;
 
       await loadStories();
     } catch (err: any) {
       console.error("Ошибка загрузки истории:", err);
-      alert("Не удалось загрузить историю: " + (err.message || "неизвестная ошибка"));
+
+      alert(
+        "Не удалось загрузить историю: " +
+          (err.message || "неизвестная ошибка")
+      );
     } finally {
       setIsUploadingStory(false);
+
       if (storyFileInputRef.current) {
         storyFileInputRef.current.value = "";
       }
@@ -366,6 +479,7 @@ export default function HomePage() {
     setViewerGroupIndex(null);
     setViewerStoryIndex(0);
     setViewerProgress(0);
+
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
     }
@@ -375,19 +489,32 @@ export default function HomePage() {
     if (viewerGroupIndex === null) return;
 
     const currentGroup = storyGroups[viewerGroupIndex];
+
     if (!currentGroup) return;
 
-    if (viewerStoryIndex < currentGroup.stories.length - 1) {
+    if (
+      viewerStoryIndex <
+      currentGroup.stories.length - 1
+    ) {
       setViewerStoryIndex((prev) => prev + 1);
       setViewerProgress(0);
-    } else if (viewerGroupIndex < storyGroups.length - 1) {
-      setViewerGroupIndex((prev) => (prev !== null ? prev + 1 : null));
+    } else if (
+      viewerGroupIndex <
+      storyGroups.length - 1
+    ) {
+      setViewerGroupIndex((prev) =>
+        prev !== null ? prev + 1 : null
+      );
       setViewerStoryIndex(0);
       setViewerProgress(0);
     } else {
       closeViewer();
     }
-  }, [viewerGroupIndex, viewerStoryIndex, storyGroups]);
+  }, [
+    viewerGroupIndex,
+    viewerStoryIndex,
+    storyGroups,
+  ]);
 
   const goToPrevStory = () => {
     if (viewerGroupIndex === null) return;
@@ -396,9 +523,17 @@ export default function HomePage() {
       setViewerStoryIndex((prev) => prev - 1);
       setViewerProgress(0);
     } else if (viewerGroupIndex > 0) {
-      const prevGroup = storyGroups[viewerGroupIndex - 1];
-      setViewerGroupIndex((prev) => (prev !== null ? prev - 1 : null));
-      setViewerStoryIndex(prevGroup.stories.length - 1);
+      const prevGroup =
+        storyGroups[viewerGroupIndex - 1];
+
+      setViewerGroupIndex((prev) =>
+        prev !== null ? prev - 1 : null
+      );
+
+      setViewerStoryIndex(
+        prevGroup.stories.length - 1
+      );
+
       setViewerProgress(0);
     }
   };
@@ -406,8 +541,11 @@ export default function HomePage() {
   useEffect(() => {
     if (viewerGroupIndex === null) return;
 
-    const currentGroup = storyGroups[viewerGroupIndex];
-    const currentStory = currentGroup?.stories[viewerStoryIndex];
+    const currentGroup =
+      storyGroups[viewerGroupIndex];
+
+    const currentStory =
+      currentGroup?.stories[viewerStoryIndex];
 
     if (!currentStory) return;
 
@@ -425,13 +563,16 @@ export default function HomePage() {
 
     progressIntervalRef.current = setInterval(() => {
       currentStep += 1;
+
       const pct = (currentStep / steps) * 100;
+
       setViewerProgress(pct);
 
       if (pct >= 100) {
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current);
         }
+
         goToNextStory();
       }
     }, stepMs);
@@ -441,7 +582,16 @@ export default function HomePage() {
         clearInterval(progressIntervalRef.current);
       }
     };
-  }, [viewerGroupIndex, viewerStoryIndex, storyGroups, goToNextStory]);
+  }, [
+    viewerGroupIndex,
+    viewerStoryIndex,
+    storyGroups,
+    goToNextStory,
+  ]);
+
+  // =========================================================
+  // POSTS
+  // =========================================================
 
   const fetchPosts = useCallback(async () => {
     setIsLoadingPosts(true);
@@ -450,72 +600,163 @@ export default function HomePage() {
       let query = supabase
         .from("posts")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("created_at", {
+          ascending: false,
+        });
 
       if (feedCategory !== "Все") {
-        query = query.eq("category", feedCategory);
+        query = query.eq(
+          "category",
+          feedCategory
+        );
       }
 
-      const { data: postsData, error: postsError } = await query;
+      const {
+        data: postsData,
+        error: postsError,
+      } = await query;
 
       if (postsError) {
-        console.error("Ошибка загрузки постов:", postsError);
+        console.error(
+          "Ошибка загрузки постов:",
+          postsError
+        );
+
         setIsLoadingPosts(false);
         return;
       }
 
-      if (!postsData || postsData.length === 0) {
+      if (
+        !postsData ||
+        postsData.length === 0
+      ) {
         setPosts([]);
         setIsLoadingPosts(false);
         return;
       }
 
-      const userIds = Array.from(new Set(postsData.map((p) => p.user_id)));
-      const postIds = postsData.map((p) => p.id);
+      const userIds = Array.from(
+        new Set(postsData.map((p) => p.user_id))
+      );
 
-      const [profilesRes, likesRes, commentsRes] = await Promise.all([
-        supabase.from("profiles").select("id, name").in("id", userIds),
-        supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
+      const postIds = postsData.map(
+        (p) => p.id
+      );
+
+      const [
+        profilesRes,
+        likesRes,
+        commentsRes,
+      ] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, name")
+          .in("id", userIds),
+
+        supabase
+          .from("post_likes")
+          .select("post_id, user_id")
+          .in("post_id", postIds),
+
         supabase
           .from("post_comments")
-          .select("id, post_id, user_id, content, created_at, parent_comment_id, image_url")
+          .select(
+            "id, post_id, user_id, content, created_at, parent_comment_id, image_url"
+          )
           .in("post_id", postIds)
-          .order("created_at", { ascending: true }),
+          .order("created_at", {
+            ascending: true,
+          }),
       ]);
 
-      const profilesMap = new Map(profilesRes.data?.map((p) => [p.id, p.name]));
-      const likesData = likesRes.data || [];
-      const commentsData = commentsRes.data || [];
+      const profilesMap = new Map(
+        profilesRes.data?.map((p) => [
+          p.id,
+          p.name,
+        ])
+      );
 
-      const commenterIds = Array.from(new Set(commentsData.map((c) => c.user_id)));
-      const { data: commenterProfiles } = commenterIds.length
-        ? await supabase.from("profiles").select("id, name").in("id", commenterIds)
-        : { data: [] as { id: string; name: string }[] };
+      const likesData =
+        likesRes.data || [];
 
-      const commenterMap = new Map((commenterProfiles || []).map((p) => [p.id, p.name]));
+      const commentsData =
+        commentsRes.data || [];
 
-      const commentsMap: Record<string, Comment[]> = {};
+      const commenterIds = Array.from(
+        new Set(
+          commentsData.map(
+            (c) => c.user_id
+          )
+        )
+      );
+
+      const {
+        data: commenterProfiles,
+      } = commenterIds.length
+        ? await supabase
+            .from("profiles")
+            .select("id, name")
+            .in("id", commenterIds)
+        : {
+            data: [] as {
+              id: string;
+              name: string;
+            }[],
+          };
+
+      const commenterMap = new Map(
+        (commenterProfiles || []).map(
+          (p) => [p.id, p.name]
+        )
+      );
+
+      const commentsMap: Record<
+        string,
+        Comment[]
+      > = {};
+
       commentsData.forEach((c) => {
         const enriched: Comment = {
           ...c,
-          authorName: commenterMap.get(c.user_id) || "Пользователь",
+          authorName:
+            commenterMap.get(
+              c.user_id
+            ) || "Пользователь",
         };
-        if (!commentsMap[c.post_id]) commentsMap[c.post_id] = [];
-        commentsMap[c.post_id].push(enriched);
+
+        if (!commentsMap[c.post_id]) {
+          commentsMap[c.post_id] = [];
+        }
+
+        commentsMap[c.post_id].push(
+          enriched
+        );
       });
+
       setCommentsByPost(commentsMap);
 
-      const formattedPosts: Post[] = postsData.map((post) => ({
-        ...post,
-        profiles: {
-          name: profilesMap.get(post.user_id) || "Пользователь",
-        },
-        post_likes: likesData.filter((l) => l.post_id === post.id),
-      }));
+      const formattedPosts: Post[] =
+        postsData.map((post) => ({
+          ...post,
+          profiles: {
+            name:
+              profilesMap.get(
+                post.user_id
+              ) || "Пользователь",
+          },
+          post_likes:
+            likesData.filter(
+              (l) =>
+                l.post_id === post.id
+            ),
+        }));
 
       setPosts(formattedPosts);
     } catch (err) {
-      console.error("Системная ошибка при загрузке постов:", err);
+      console.error(
+        "Системная ошибка при загрузке постов:",
+        err
+      );
     } finally {
       setIsLoadingPosts(false);
     }
@@ -527,51 +768,110 @@ export default function HomePage() {
     }
   }, [isLoaded, fetchPosts]);
 
-  // Универсальная загрузка картинки в Supabase Storage
-  const uploadImageToBucket = async (bucket: string, file: File, folder: string) => {
-    const fileExt = file.name.split(".").pop();
-    const filePath = folder + "/" + Date.now() + "-" + Math.round(Math.random() * 1e6) + "." + fileExt;
+  // =========================================================
+  // ЗАГРУЗКА ФОТО
+  // =========================================================
 
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+  const uploadImageToBucket = async (
+    bucket: string,
+    file: File,
+    folder: string
+  ) => {
+    const fileExt =
+      file.name.split(".").pop();
+
+    const filePath =
+      folder +
+      "/" +
+      Date.now() +
+      "-" +
+      Math.round(Math.random() * 1e6) +
+      "." +
+      fileExt;
+
+    const {
+      error: uploadError,
+    } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file);
+
     if (uploadError) throw uploadError;
 
     const {
       data: { publicUrl },
-    } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(filePath);
 
     return publicUrl;
   };
 
-  const handlePostImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePostImageSelect = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
+
     if (!file) return;
+
     setPostImageFile(file);
-    setPostImagePreview(URL.createObjectURL(file));
+    setPostImagePreview(
+      URL.createObjectURL(file)
+    );
   };
 
   const handleRemovePostImage = () => {
     setPostImageFile(null);
     setPostImagePreview(null);
-    if (postImageInputRef.current) postImageInputRef.current.value = "";
+
+    if (postImageInputRef.current) {
+      postImageInputRef.current.value = "";
+    }
   };
 
-  const handleCommentImageSelect = (postId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCommentImageSelect = (
+    postId: string,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
+
     if (!file) return;
-    setCommentImageFiles((prev) => ({ ...prev, [postId]: file }));
-    setCommentImagePreviews((prev) => ({ ...prev, [postId]: URL.createObjectURL(file) }));
+
+    setCommentImageFiles((prev) => ({
+      ...prev,
+      [postId]: file,
+    }));
+
+    setCommentImagePreviews((prev) => ({
+      ...prev,
+      [postId]: URL.createObjectURL(file),
+    }));
   };
 
-  const handleRemoveCommentImage = (postId: string) => {
-    setCommentImageFiles((prev) => ({ ...prev, [postId]: null }));
+  const handleRemoveCommentImage = (
+    postId: string
+  ) => {
+    setCommentImageFiles((prev) => ({
+      ...prev,
+      [postId]: null,
+    }));
+
     setCommentImagePreviews((prev) => {
       const next = { ...prev };
+
       delete next[postId];
+
       return next;
     });
   };
 
-  const handleToggleLike = async (postId: string, isLiked: boolean) => {
+  // =========================================================
+  // ЛАЙК ПОСТА
+  // =========================================================
+
+  const handleToggleLike = async (
+    postId: string,
+    isLiked: boolean
+  ) => {
     if (!userId) {
       router.push("/auth/login");
       return;
@@ -580,42 +880,74 @@ export default function HomePage() {
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
         if (post.id === postId) {
-          const currentLikes = post.post_likes || [];
-          const updatedLikes = isLiked
-            ? currentLikes.filter((like) => like.user_id !== userId)
-            : [...currentLikes, { user_id: userId }];
+          const currentLikes =
+            post.post_likes || [];
 
-          return { ...post, post_likes: updatedLikes };
+          const updatedLikes = isLiked
+            ? currentLikes.filter(
+                (like) =>
+                  like.user_id !== userId
+              )
+            : [
+                ...currentLikes,
+                {
+                  user_id: userId,
+                },
+              ];
+
+          return {
+            ...post,
+            post_likes: updatedLikes,
+          };
         }
+
         return post;
       })
     );
 
     try {
       if (isLiked) {
-        const { error } = await supabase
-          .from("post_likes")
-          .delete()
-          .eq("post_id", postId)
-          .eq("user_id", userId);
+        const { error } =
+          await supabase
+            .from("post_likes")
+            .delete()
+            .eq("post_id", postId)
+            .eq("user_id", userId);
 
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("post_likes").insert({
-          post_id: postId,
-          user_id: userId,
-        });
+        const { error } =
+          await supabase
+            .from("post_likes")
+            .insert({
+              post_id: postId,
+              user_id: userId,
+            });
 
         if (error) throw error;
       }
     } catch (error) {
-      console.error("Ошибка обновления лайка:", error);
+      console.error(
+        "Ошибка обновления лайка:",
+        error
+      );
+
       fetchPosts();
     }
   };
 
+  // =========================================================
+  // СОЗДАНИЕ ПОСТА
+  // =========================================================
+
   const handleCreatePost = async () => {
-    if ((!postText.trim() && !postImageFile) || isSubmitting) return;
+    if (
+      (!postText.trim() &&
+        !postImageFile) ||
+      isSubmitting
+    ) {
+      return;
+    }
 
     if (!userId) {
       router.push("/auth/login");
@@ -628,127 +960,217 @@ export default function HomePage() {
 
     if (postImageFile) {
       try {
-        imageUrl = await uploadImageToBucket("post-images", postImageFile, userId);
+        imageUrl =
+          await uploadImageToBucket(
+            "post-images",
+            postImageFile,
+            userId
+          );
       } catch (err: any) {
-        console.error("Ошибка загрузки фото поста:", err);
+        console.error(
+          "Ошибка загрузки фото поста:",
+          err
+        );
+
         alert(
           "Не удалось загрузить фото: " +
-            (err?.message || "неизвестная ошибка") +
-            "\n\nПроверьте, что в Supabase создан bucket \"post-images\" (публичный, с разрешением загрузки для авторизованных пользователей)."
+            (err?.message ||
+              "неизвестная ошибка") +
+            "\n\nПроверьте, что в Supabase создан bucket \"post-images\"."
         );
+
         setIsSubmitting(false);
         return;
       }
     }
 
-    const { error } = await supabase.from("posts").insert({
-      user_id: userId,
-      content: postText.trim(),
-      category: selectedCategory,
-      image_url: imageUrl,
-    });
+    const { error } =
+      await supabase.from("posts").insert({
+        user_id: userId,
+        content: postText.trim(),
+        category: selectedCategory,
+        image_url: imageUrl,
+      });
 
     if (error) {
-      console.error("Ошибка при создании поста:", error);
-      alert(`Не удалось опубликовать пост: ${error.message}`);
+      console.error(
+        "Ошибка при создании поста:",
+        error
+      );
+
+      alert(
+        `Не удалось опубликовать пост: ${error.message}`
+      );
     } else {
       setPostText("");
+
       handleRemovePostImage();
+
       await fetchPosts();
     }
 
     setIsSubmitting(false);
   };
 
-  const handleDeletePost = async (postId: string) => {
-    if (!confirm("Удалить этот пост? Это действие нельзя отменить.")) return;
+  // =========================================================
+  // УДАЛЕНИЕ ПОСТА
+  // =========================================================
+
+  const handleDeletePost = async (
+    postId: string
+  ) => {
+    if (
+      !confirm(
+        "Удалить этот пост? Это действие нельзя отменить."
+      )
+    ) {
+      return;
+    }
 
     const previousPosts = posts;
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
 
-    // ВАЖНО: добавляем .select() к delete(), т.к. Supabase НЕ возвращает
-    // ошибку, если RLS-политика молча блокирует удаление — запрос
-    // "успешен", но удаляет 0 строк. .select() возвращает удалённые
-    // строки, поэтому по пустому массиву можно понять, что ничего
-    // на самом деле не удалилось.
-    const { data, error } = await supabase
+    setPosts((prev) =>
+      prev.filter(
+        (p) => p.id !== postId
+      )
+    );
+
+    const {
+      data,
+      error,
+    } = await supabase
       .from("posts")
       .delete()
       .eq("id", postId)
       .select();
 
     if (error) {
-      console.error("Ошибка удаления поста:", error);
+      console.error(
+        "Ошибка удаления поста:",
+        error
+      );
+
       alert(
         "Не удалось удалить пост: " +
           error.message +
-          (error.code ? " (код: " + error.code + ")" : "")
+          (error.code
+            ? " (код: " +
+              error.code +
+              ")"
+            : "")
       );
+
       setPosts(previousPosts);
       return;
     }
 
     if (!data || data.length === 0) {
-      console.error("Удаление не затронуло ни одной строки — вероятно, RLS блокирует DELETE.");
+      console.error(
+        "Удаление не затронуло ни одной строки — вероятно, RLS блокирует DELETE."
+      );
+
       alert(
         "Пост не был удалён. Похоже, в Supabase на таблице posts нет DELETE-политики (RLS), которая разрешает автору удалять свой пост.\n\n" +
           "Добавьте в Supabase → Authentication → Policies → posts политику:\n\n" +
-          "create policy \"Users can delete own posts\"\non posts for delete\nusing (auth.uid() = user_id);"
+          'create policy "Users can delete own posts"\non posts for delete\nusing (auth.uid() = user_id);'
       );
+
       setPosts(previousPosts);
     }
   };
 
-  const toggleComments = (postId: string) => {
+  // =========================================================
+  // КОММЕНТАРИИ
+  // =========================================================
+
+  const toggleComments = (
+    postId: string
+  ) => {
     setOpenComments((prev) => {
       const next = new Set(prev);
+
       if (next.has(postId)) {
         next.delete(postId);
       } else {
         next.add(postId);
       }
+
       return next;
     });
   };
 
-  const handleCommentDraftChange = (postId: string, value: string) => {
-    setCommentDrafts((prev) => ({ ...prev, [postId]: value }));
+  const handleCommentDraftChange = (
+    postId: string,
+    value: string
+  ) => {
+    setCommentDrafts((prev) => ({
+      ...prev,
+      [postId]: value,
+    }));
   };
 
-  const handleAddComment = async (postId: string) => {
+  const handleAddComment = async (
+    postId: string
+  ) => {
     if (!userId) {
       router.push("/auth/login");
       return;
     }
 
-    const text = (commentDrafts[postId] || "").trim();
-    const imageFile = commentImageFiles[postId];
+    const text = (
+      commentDrafts[postId] || ""
+    ).trim();
+
+    const imageFile =
+      commentImageFiles[postId];
+
     if (!text && !imageFile) return;
 
-    setSubmittingComment((prev) => new Set(prev).add(postId));
+    setSubmittingComment(
+      (prev) =>
+        new Set(prev).add(postId)
+    );
 
     let imageUrl: string | null = null;
 
     if (imageFile) {
       try {
-        imageUrl = await uploadImageToBucket("comment-images", imageFile, userId);
+        imageUrl =
+          await uploadImageToBucket(
+            "comment-images",
+            imageFile,
+            userId
+          );
       } catch (err: any) {
-        console.error("Ошибка загрузки фото комментария:", err);
+        console.error(
+          "Ошибка загрузки фото комментария:",
+          err
+        );
+
         alert(
           "Не удалось загрузить фото: " +
-            (err?.message || "неизвестная ошибка") +
-            "\n\nПроверьте, что в Supabase создан bucket \"comment-images\" (публичный, с разрешением загрузки для авторизованных пользователей)."
+            (err?.message ||
+              "неизвестная ошибка")
         );
-        setSubmittingComment((prev) => {
-          const next = new Set(prev);
-          next.delete(postId);
-          return next;
-        });
+
+        setSubmittingComment(
+          (prev) => {
+            const next = new Set(prev);
+
+            next.delete(postId);
+
+            return next;
+          }
+        );
+
         return;
       }
     }
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    } = await supabase
       .from("post_comments")
       .insert({
         post_id: postId,
@@ -761,8 +1183,15 @@ export default function HomePage() {
       .single();
 
     if (error) {
-      console.error("Ошибка добавления комментария:", error);
-      alert("Не удалось добавить комментарий: " + error.message);
+      console.error(
+        "Ошибка добавления комментария:",
+        error
+      );
+
+      alert(
+        "Не удалось добавить комментарий: " +
+          error.message
+      );
     } else if (data) {
       const newComment: Comment = {
         ...data,
@@ -771,58 +1200,110 @@ export default function HomePage() {
 
       setCommentsByPost((prev) => ({
         ...prev,
-        [postId]: [...(prev[postId] || []), newComment],
+        [postId]: [
+          ...(prev[postId] || []),
+          newComment,
+        ],
       }));
 
-      setCommentDrafts((prev) => ({ ...prev, [postId]: "" }));
+      setCommentDrafts((prev) => ({
+        ...prev,
+        [postId]: "",
+      }));
+
       handleRemoveCommentImage(postId);
     }
 
     setSubmittingComment((prev) => {
       const next = new Set(prev);
+
       next.delete(postId);
+
       return next;
     });
   };
 
-  const startReply = (commentId: string) => {
-    setReplyingTo((prev) => ({ ...prev, [commentId]: commentId }));
+  const startReply = (
+    commentId: string
+  ) => {
+    setReplyingTo((prev) => ({
+      ...prev,
+      [commentId]: commentId,
+    }));
   };
 
-  const cancelReply = (commentId: string) => {
-    setReplyingTo((prev) => ({ ...prev, [commentId]: null }));
-    setReplyDrafts((prev) => ({ ...prev, [commentId]: "" }));
+  const cancelReply = (
+    commentId: string
+  ) => {
+    setReplyingTo((prev) => ({
+      ...prev,
+      [commentId]: null,
+    }));
+
+    setReplyDrafts((prev) => ({
+      ...prev,
+      [commentId]: "",
+    }));
   };
 
-  const handleReplyDraftChange = (commentId: string, value: string) => {
-    setReplyDrafts((prev) => ({ ...prev, [commentId]: value }));
+  const handleReplyDraftChange = (
+    commentId: string,
+    value: string
+  ) => {
+    setReplyDrafts((prev) => ({
+      ...prev,
+      [commentId]: value,
+    }));
   };
 
-  const handleAddReply = async (postId: string, parentCommentId: string) => {
+  const handleAddReply = async (
+    postId: string,
+    parentCommentId: string
+  ) => {
     if (!userId) {
       router.push("/auth/login");
       return;
     }
 
-    const text = (replyDrafts[parentCommentId] || "").trim();
+    const text = (
+      replyDrafts[parentCommentId] ||
+      ""
+    ).trim();
+
     if (!text) return;
 
-    setSubmittingReply((prev) => new Set(prev).add(parentCommentId));
+    setSubmittingReply(
+      (prev) =>
+        new Set(prev).add(
+          parentCommentId
+        )
+    );
 
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    } = await supabase
       .from("post_comments")
       .insert({
         post_id: postId,
         user_id: userId,
         content: text,
-        parent_comment_id: parentCommentId,
+        parent_comment_id:
+          parentCommentId,
       })
       .select()
       .single();
 
     if (error) {
-      console.error("Ошибка добавления ответа:", error);
-      alert("Не удалось добавить ответ: " + error.message);
+      console.error(
+        "Ошибка добавления ответа:",
+        error
+      );
+
+      alert(
+        "Не удалось добавить ответ: " +
+          error.message
+      );
     } else if (data) {
       const newReply: Comment = {
         ...data,
@@ -831,36 +1312,80 @@ export default function HomePage() {
 
       setCommentsByPost((prev) => ({
         ...prev,
-        [postId]: [...(prev[postId] || []), newReply],
+        [postId]: [
+          ...(prev[postId] || []),
+          newReply,
+        ],
       }));
 
-      setReplyDrafts((prev) => ({ ...prev, [parentCommentId]: "" }));
-      setReplyingTo((prev) => ({ ...prev, [parentCommentId]: null }));
+      setReplyDrafts((prev) => ({
+        ...prev,
+        [parentCommentId]: "",
+      }));
+
+      setReplyingTo((prev) => ({
+        ...prev,
+        [parentCommentId]: null,
+      }));
     }
 
     setSubmittingReply((prev) => {
       const next = new Set(prev);
+
       next.delete(parentCommentId);
+
       return next;
     });
   };
 
-  const openRepostModal = async (postId: string) => {
+  // =========================================================
+  // РЕПОСТ
+  // =========================================================
+
+  const openRepostModal = async (
+    postId: string
+  ) => {
     setRepostPostId(postId);
     setRepostSentTo(new Set());
 
-    if (repostTargets.length > 0 || !userId) return;
+    if (
+      repostTargets.length > 0 ||
+      !userId
+    ) {
+      return;
+    }
 
     setIsLoadingRepostTargets(true);
 
-    const [matches1Res, matches2Res] = await Promise.all([
-      supabase.from("matches").select("id, user2_id").eq("user1_id", userId),
-      supabase.from("matches").select("id, user1_id").eq("user2_id", userId),
+    const [
+      matches1Res,
+      matches2Res,
+    ] = await Promise.all([
+      supabase
+        .from("matches")
+        .select("id, user2_id")
+        .eq("user1_id", userId),
+
+      supabase
+        .from("matches")
+        .select("id, user1_id")
+        .eq("user2_id", userId),
     ]);
 
     const matchRows = [
-      ...(matches1Res.data || []).map((m) => ({ matchId: m.id, otherUserId: m.user2_id })),
-      ...(matches2Res.data || []).map((m) => ({ matchId: m.id, otherUserId: m.user1_id })),
+      ...(matches1Res.data || []).map(
+        (m) => ({
+          matchId: m.id,
+          otherUserId: m.user2_id,
+        })
+      ),
+
+      ...(matches2Res.data || []).map(
+        (m) => ({
+          matchId: m.id,
+          otherUserId: m.user1_id,
+        })
+      ),
     ];
 
     if (matchRows.length === 0) {
@@ -869,32 +1394,71 @@ export default function HomePage() {
       return;
     }
 
-    const matchIds = matchRows.map((m) => m.matchId);
-    const otherUserIds = matchRows.map((m) => m.otherUserId);
+    const matchIds =
+      matchRows.map(
+        (m) => m.matchId
+      );
 
-    const [conversationsRes, profilesRes] = await Promise.all([
-      supabase.from("conversations").select("id, match_id").in("match_id", matchIds),
-      supabase.from("profiles").select("id, name, avatar_url, avatar").in("id", otherUserIds),
+    const otherUserIds =
+      matchRows.map(
+        (m) => m.otherUserId
+      );
+
+    const [
+      conversationsRes,
+      profilesRes,
+    ] = await Promise.all([
+      supabase
+        .from("conversations")
+        .select("id, match_id")
+        .in("match_id", matchIds),
+
+      supabase
+        .from("profiles")
+        .select(
+          "id, name, avatar_url, avatar"
+        )
+        .in("id", otherUserIds),
     ]);
 
-    const targets: RepostTarget[] = matchRows
-      .map((row) => {
-        const conversation = conversationsRes.data?.find((c) => c.match_id === row.matchId);
-        const profile = profilesRes.data?.find((p) => p.id === row.otherUserId);
+    const targets: RepostTarget[] =
+      matchRows
+        .map((row) => {
+          const conversation =
+            conversationsRes.data?.find(
+              (c) =>
+                c.match_id ===
+                row.matchId
+            );
 
-        if (!conversation || !profile) return null;
+          const profile =
+            profilesRes.data?.find(
+              (p) =>
+                p.id ===
+                row.otherUserId
+            );
 
-        return {
-          matchId: row.matchId,
-          conversationId: conversation.id,
-          name: profile.name || "Пользователь",
-          avatar:
-            profile.avatar_url ||
-            profile.avatar ||
-            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-        } as RepostTarget;
-      })
-      .filter(Boolean) as RepostTarget[];
+          if (
+            !conversation ||
+            !profile
+          ) {
+            return null;
+          }
+
+          return {
+            matchId: row.matchId,
+            conversationId:
+              conversation.id,
+            name:
+              profile.name ||
+              "Пользователь",
+            avatar:
+              profile.avatar_url ||
+              profile.avatar ||
+              "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+          } as RepostTarget;
+        })
+        .filter(Boolean) as RepostTarget[];
 
     setRepostTargets(targets);
     setIsLoadingRepostTargets(false);
@@ -904,37 +1468,84 @@ export default function HomePage() {
     setRepostPostId(null);
   };
 
-  const handleSendRepost = async (target: RepostTarget) => {
-    if (!userId || !repostPostId) return;
+  const handleSendRepost = async (
+    target: RepostTarget
+  ) => {
+    if (
+      !userId ||
+      !repostPostId
+    ) {
+      return;
+    }
 
-    const post = posts.find((p) => p.id === repostPostId);
+    const post = posts.find(
+      (p) => p.id === repostPostId
+    );
+
     if (!post) return;
 
-    setSendingRepostTo(target.matchId);
+    setSendingRepostTo(
+      target.matchId
+    );
 
-    const excerpt = post.content.length > 120 ? post.content.slice(0, 120) + "..." : post.content;
-    const authorName = post.profiles?.name || "Пользователь";
+    const excerpt =
+      post.content.length > 120
+        ? post.content.slice(0, 120) +
+          "..."
+        : post.content;
+
+    const authorName =
+      post.profiles?.name ||
+      "Пользователь";
+
     const messageContent =
-      "📤 Поделился(-ась) постом от " + authorName + ":\n\"" + excerpt + "\"";
+      "📤 Поделился(-ась) постом от " +
+      authorName +
+      ":\n\"" +
+      excerpt +
+      "\"";
 
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: target.conversationId,
-      sender_id: userId,
-      content: messageContent,
-    });
+    const { error } =
+      await supabase
+        .from("messages")
+        .insert({
+          conversation_id:
+            target.conversationId,
+          sender_id: userId,
+          content:
+            messageContent,
+        });
 
     if (error) {
-      console.error("Ошибка репоста:", error);
-      alert("Не удалось отправить: " + error.message);
+      console.error(
+        "Ошибка репоста:",
+        error
+      );
+
+      alert(
+        "Не удалось отправить: " +
+          error.message
+      );
     } else {
-      setRepostSentTo((prev) => new Set(prev).add(target.matchId));
+      setRepostSentTo(
+        (prev) =>
+          new Set(prev).add(
+            target.matchId
+          )
+      );
     }
 
     setSendingRepostTo(null);
   };
 
+  // =========================================================
+  // ВЫХОД
+  // =========================================================
+
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } =
+      await supabase.auth.signOut();
+
     if (!error) {
       router.push("/auth/login");
       router.refresh();
@@ -943,33 +1554,67 @@ export default function HomePage() {
 
   if (!isLoaded) return null;
 
-  const activeGroup = viewerGroupIndex !== null ? storyGroups[viewerGroupIndex] : null;
-  const activeStory = activeGroup ? activeGroup.stories[viewerStoryIndex] : null;
-  const repostPost = repostPostId ? posts.find((p) => p.id === repostPostId) : null;
+  const activeGroup =
+    viewerGroupIndex !== null
+      ? storyGroups[
+          viewerGroupIndex
+        ]
+      : null;
+
+  const activeStory =
+    activeGroup
+      ? activeGroup.stories[
+          viewerStoryIndex
+        ]
+      : null;
+
+  const repostPost =
+    repostPostId
+      ? posts.find(
+          (p) =>
+            p.id === repostPostId
+        )
+      : null;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-gray-800 font-sans pb-12">
       <header className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-         <span className="font-logo text-xl text-gray-900">mingle</span>
-          <span className="text-xs text-gray-400 font-medium">здесь общаются</span>
+          <span className="font-logo text-xl text-gray-900">
+            mingle
+          </span>
+
+          <span className="text-xs text-gray-400 font-medium">
+            здесь общаются
+          </span>
         </div>
 
         <div className="flex items-center gap-3">
           {displayName !== "Гость" ? (
             <>
               <span className="text-xs text-gray-400 hidden sm:inline">
-                👋 Здравствуйте, <span className="font-black text-gray-900">{displayName}</span>
+                👋 Здравствуйте,{" "}
+                <span className="font-black text-gray-900">
+                  {displayName}
+                </span>
               </span>
+
               <Link
                 href="/profile"
                 className="flex items-center bg-gray-100 hover:bg-gray-200 rounded-full p-1 text-xs font-bold transition cursor-pointer"
               >
                 <span className="bg-pink-500 text-white px-2.5 py-1 rounded-full uppercase text-[10px]">
-                  {displayName.slice(0, 2)}
+                  {displayName.slice(
+                    0,
+                    2
+                  )}
                 </span>
-                <span className="px-3 text-gray-800 uppercase tracking-wider">{displayName}</span>
+
+                <span className="px-3 text-gray-800 uppercase tracking-wider">
+                  {displayName}
+                </span>
               </Link>
+
               <button
                 onClick={handleLogout}
                 className="text-xs text-gray-500 hover:text-gray-900 font-medium px-3 py-1.5 rounded-full border border-gray-200 bg-white cursor-pointer"
@@ -989,70 +1634,143 @@ export default function HomePage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 pt-4 grid grid-cols-12 gap-6">
+
         {/* ЛЕВОЕ МЕНЮ */}
+
         <aside className="col-span-12 md:col-span-3 space-y-2">
           <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-100 space-y-1.5 sticky top-4">
-            <Link href="/" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl bg-gray-100 font-bold text-sm text-gray-900">
+
+            <Link
+              href="/"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl bg-gray-100 font-bold text-sm text-gray-900"
+            >
               🏠 Главная
             </Link>
-            <Link href="/discover" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+
+            <Link
+              href="/discover"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
               🔥 Смотреть людей
             </Link>
-            <Link href="/matches" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+
+            <Link
+              href="/matches"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
               💫 Мэтчи
             </Link>
-            <Link href="/likes" className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
-              <span className="flex items-center gap-3.5">💌 Лайки</span>
+
+            <Link
+              href="/likes"
+              className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
+              <span className="flex items-center gap-3.5">
+                💌 Лайки
+              </span>
+
               {likesCount > 0 && (
                 <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
-                  {likesCount > 9 ? "9+" : likesCount}
+                  {likesCount > 9
+                    ? "9+"
+                    : likesCount}
                 </span>
               )}
             </Link>
-            <Link href="/people" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+
+            {/* УВЕДОМЛЕНИЯ */}
+
+            <Link
+              href="/notifications"
+              className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
+              <span className="flex items-center gap-3.5">
+                🔔 Уведомления
+              </span>
+
+              {notificationsCount > 0 && (
+                <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
+                  {notificationsCount > 9
+                    ? "9+"
+                    : notificationsCount}
+                </span>
+              )}
+            </Link>
+
+            <Link
+              href="/people"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
               👥 Люди
             </Link>
-            <Link href="/messages" className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
-              <span className="flex items-center gap-3.5">💬 Сообщения</span>
+
+            <Link
+              href="/messages"
+              className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
+              <span className="flex items-center gap-3.5">
+                💬 Сообщения
+              </span>
+
               {unreadCount > 0 && (
                 <span className="bg-pink-600 text-white text-[10px] font-black min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center">
-                  {unreadCount > 9 ? "9+" : unreadCount}
+                  {unreadCount > 9
+                    ? "9+"
+                    : unreadCount}
                 </span>
               )}
             </Link>
-            <Link href="/profile" className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition">
+
+            <Link
+              href="/profile"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
               👤 Мой профиль
             </Link>
+
           </div>
         </aside>
 
         {/* ЦЕНТРАЛЬНАЯ ЛЕНТА */}
+
         <section className="col-span-12 md:col-span-6 space-y-6">
+
           {/* ИСТОРИИ */}
+
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-sm">📸</span>
+                <span className="text-sm">
+                  📸
+                </span>
+
                 <h3 className="text-xs font-black uppercase tracking-wider text-gray-900">
                   ИСТОРИИ
                 </h3>
               </div>
-              <span className="text-[10px] text-gray-400 font-medium">Свежее</span>
+
+              <span className="text-[10px] text-gray-400 font-medium">
+                Свежее
+              </span>
             </div>
 
             <div className="flex items-center gap-3 overflow-x-auto pb-1">
+
               <div
-                onClick={handleCreateStoryClick}
+                onClick={
+                  handleCreateStoryClick
+                }
                 className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer"
               >
                 <div className="w-11 h-11 rounded-full border-2 border-dashed border-pink-400 bg-pink-50 flex items-center justify-center text-pink-600 font-bold text-sm">
-                  {isUploadingStory ? (
-                    <span className="text-[9px]">...</span>
-                  ) : (
-                    "+"
-                  )}
+                  {isUploadingStory
+                    ? "..."
+                    : "+"}
                 </div>
-                <span className="text-[10px] text-gray-600 font-medium">Создать</span>
+
+                <span className="text-[10px] text-gray-600 font-medium">
+                  Создать
+                </span>
               </div>
 
               <input
@@ -1060,84 +1778,133 @@ export default function HomePage() {
                 type="file"
                 accept="image/*,video/*"
                 className="hidden"
-                onChange={handleStoryFileSelected}
+                onChange={
+                  handleStoryFileSelected
+                }
               />
 
-              {storyGroups.map((group, idx) => (
-                <div
-                  key={group.userId}
-                  onClick={() => openViewer(idx)}
-                  className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer"
-                >
-                  <div className="w-11 h-11 rounded-full p-[2px] bg-gradient-to-tr from-pink-500 to-purple-500">
-                    <img
-                      src={group.avatar}
-                      alt={group.name}
-                      className="w-full h-full object-cover rounded-full"
-                    />
-                  </div>
-                  <span className="text-[10px] font-bold text-gray-700 truncate max-w-[46px]">
-                    {group.name}
-                  </span>
-                </div>
-              ))}
+              {storyGroups.map(
+                (group, idx) => (
+                  <div
+                    key={
+                      group.userId
+                    }
+                    onClick={() =>
+                      openViewer(idx)
+                    }
+                    className="flex flex-col items-center gap-1 min-w-[46px] cursor-pointer"
+                  >
+                    <div className="w-11 h-11 rounded-full p-[2px] bg-gradient-to-tr from-pink-500 to-purple-500">
+                      <img
+                        src={
+                          group.avatar
+                        }
+                        alt={
+                          group.name
+                        }
+                        className="w-full h-full object-cover rounded-full"
+                      />
+                    </div>
 
-              {storyGroups.length === 0 && (
+                    <span className="text-[10px] font-bold text-gray-700 truncate max-w-[46px]">
+                      {group.name}
+                    </span>
+                  </div>
+                )
+              )}
+
+              {storyGroups.length ===
+                0 && (
                 <span className="text-[11px] text-gray-400 pl-2">
                   Пока никто не опубликовал историю
                 </span>
               )}
+
             </div>
           </div>
 
           {/* СОЗДАНИЕ ПОСТА */}
+
           <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
             <div className="flex items-center gap-3">
+
               <div className="w-9 h-9 rounded-full bg-pink-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
-                {displayName.slice(0, 2).toUpperCase()}
+                {displayName.slice(
+                  0,
+                  2
+                ).toUpperCase()}
               </div>
+
               <input
                 type="text"
                 value={postText}
-                onChange={(e) => setPostText(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreatePost()}
+                onChange={(e) =>
+                  setPostText(
+                    e.target.value
+                  )
+                }
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  handleCreatePost()
+                }
                 placeholder="О чем хотите рассказать?"
                 className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-2 text-xs focus:outline-none focus:border-pink-300"
               />
+
               <button
                 type="button"
-                onClick={() => postImageInputRef.current?.click()}
+                onClick={() =>
+                  postImageInputRef.current?.click()
+                }
                 title="Прикрепить фото"
                 className="text-gray-400 hover:text-pink-500 transition cursor-pointer text-lg shrink-0"
               >
                 📷
               </button>
+
               <input
                 ref={postImageInputRef}
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={handlePostImageSelect}
+                onChange={
+                  handlePostImageSelect
+                }
               />
+
               <button
-                onClick={handleCreatePost}
-                disabled={isSubmitting || (!postText.trim() && !postImageFile)}
+                onClick={
+                  handleCreatePost
+                }
+                disabled={
+                  isSubmitting ||
+                  (!postText.trim() &&
+                    !postImageFile)
+                }
                 className="bg-[#E02868] hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-2xl transition cursor-pointer shrink-0"
               >
-                {isSubmitting ? "Публикация..." : "Опубликовать"}
+                {isSubmitting
+                  ? "Публикация..."
+                  : "Опубликовать"}
               </button>
+
             </div>
 
             {postImagePreview && (
               <div className="relative inline-block">
                 <img
-                  src={postImagePreview}
+                  src={
+                    postImagePreview
+                  }
                   alt="Превью фото"
                   className="h-20 w-20 object-cover rounded-xl border border-gray-100"
                 />
+
                 <button
                   type="button"
-                  onClick={handleRemovePostImage}
+                  onClick={
+                    handleRemovePostImage
+                  }
                   className="absolute -top-2 -right-2 bg-black/70 hover:bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center cursor-pointer"
                 >
                   ✕
@@ -1146,13 +1913,26 @@ export default function HomePage() {
             )}
 
             <div className="flex items-center gap-1.5 text-xs overflow-x-auto">
-              <span className="text-gray-400 font-medium text-[10px]">Категория:</span>
-              {["Дружба", "Свидания", "Общение", "Интересы"].map((cat) => (
+              <span className="text-gray-400 font-medium text-[10px]">
+                Категория:
+              </span>
+
+              {[
+                "Дружба",
+                "Свидания",
+                "Общение",
+                "Интересы",
+              ].map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => setSelectedCategory(cat)}
+                  onClick={() =>
+                    setSelectedCategory(
+                      cat
+                    )
+                  }
                   className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium transition cursor-pointer whitespace-nowrap ${
-                    selectedCategory === cat
+                    selectedCategory ===
+                    cat
                       ? "bg-black text-white"
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
@@ -1163,25 +1943,52 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* ФИЛЬТРЫ ЛЕНТЫ */}
+
           <div className="space-y-4 pt-2">
+
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {[
-                { name: "Все", icon: "✨" },
-                { name: "Дружба", icon: "🤝" },
-                { name: "Свидания", icon: "❤️" },
-                { name: "Общение", icon: "💬" },
-                { name: "Интересы", icon: "🎨" },
+                {
+                  name: "Все",
+                  icon: "✨",
+                },
+                {
+                  name: "Дружба",
+                  icon: "🤝",
+                },
+                {
+                  name: "Свидания",
+                  icon: "❤️",
+                },
+                {
+                  name: "Общение",
+                  icon: "💬",
+                },
+                {
+                  name: "Интересы",
+                  icon: "🎨",
+                },
               ].map((f) => (
                 <button
                   key={f.name}
-                  onClick={() => setFeedCategory(f.name)}
+                  onClick={() =>
+                    setFeedCategory(
+                      f.name
+                    )
+                  }
                   className={`px-4 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
-                    feedCategory === f.name
+                    feedCategory ===
+                    f.name
                       ? "bg-[#E02868] text-white shadow-xs"
                       : "bg-white text-gray-600 border border-gray-100 hover:bg-gray-50"
                   }`}
                 >
-                  <span>{f.icon}</span> {f.name}
+                  <span>
+                    {f.icon}
+                  </span>
+
+                  {f.name}
                 </button>
               ))}
             </div>
@@ -1190,51 +1997,127 @@ export default function HomePage() {
               <div className="bg-white rounded-3xl p-8 text-center text-xs text-gray-400 border border-gray-100">
                 Загрузка ленты...
               </div>
-            ) : posts.length === 0 ? (
+            ) : posts.length ===
+              0 ? (
               <div className="bg-white rounded-3xl p-8 text-center text-xs text-gray-400 border border-gray-100 space-y-1">
-                <p className="font-bold text-gray-600 text-sm">В этой категории пока нет постов 💭</p>
-                <p>Будьте первым, кто поделится чем-то интересным!</p>
+                <p className="font-bold text-gray-600 text-sm">
+                  В этой категории пока нет постов 💭
+                </p>
+
+                <p>
+                  Будьте первым, кто поделится чем-то интересным!
+                </p>
               </div>
             ) : (
               posts.map((post) => {
-                const isLiked = (post.post_likes || []).some((like) => like.user_id === userId);
-                const likesOnPost = post.post_likes?.length || 0;
-                const allPostComments = commentsByPost[post.id] || [];
-                const topLevelComments = allPostComments.filter((c) => !c.parent_comment_id);
-                const isCommentsOpen = openComments.has(post.id);
-                const isCommentSubmitting = submittingComment.has(post.id);
-                const isOwnPost = post.user_id === userId;
 
-                const getReplies = (commentId: string) =>
-                  allPostComments.filter((c) => c.parent_comment_id === commentId);
+                const isLiked =
+                  (
+                    post.post_likes ||
+                    []
+                  ).some(
+                    (like) =>
+                      like.user_id ===
+                      userId
+                  );
+
+                const likesOnPost =
+                  post.post_likes
+                    ?.length || 0;
+
+                const allPostComments =
+                  commentsByPost[
+                    post.id
+                  ] || [];
+
+                const topLevelComments =
+                  allPostComments.filter(
+                    (c) =>
+                      !c.parent_comment_id
+                  );
+
+                const isCommentsOpen =
+                  openComments.has(
+                    post.id
+                  );
+
+                const isCommentSubmitting =
+                  submittingComment.has(
+                    post.id
+                  );
+
+                const isOwnPost =
+                  post.user_id ===
+                  userId;
+
+                const getReplies = (
+                  commentId: string
+                ) =>
+                  allPostComments.filter(
+                    (c) =>
+                      c.parent_comment_id ===
+                      commentId
+                  );
 
                 return (
-                  <div key={post.id} className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3">
+                  <div
+                    key={post.id}
+                    className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-3"
+                  >
+
                     <div className="flex items-center justify-between">
+
                       <div className="flex items-center gap-3">
+
                         <div className="w-10 h-10 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs uppercase">
-                          {(post.profiles?.name || "П").slice(0, 2)}
+                          {(
+                            post.profiles?.name ||
+                            "П"
+                          ).slice(0, 2)}
                         </div>
+
                         <div>
-                          <h4 className="text-xs font-black text-gray-900">{post.profiles?.name || "Пользователь"}</h4>
+                          <h4 className="text-xs font-black text-gray-900">
+                            {post.profiles?.name ||
+                              "Пользователь"}
+                          </h4>
+
                           <span className="text-[10px] text-gray-400">
-                            {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(
+                              post.created_at
+                            ).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute:
+                                  "2-digit",
+                              }
+                            )}
                           </span>
                         </div>
+
                       </div>
+
                       <div className="flex items-center gap-2">
+
                         <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-3 py-1 rounded-full">
                           {post.category}
                         </span>
+
                         {isOwnPost && (
                           <button
-                            onClick={() => handleDeletePost(post.id)}
+                            onClick={() =>
+                              handleDeletePost(
+                                post.id
+                              )
+                            }
                             title="Удалить пост"
                             className="text-gray-300 hover:text-red-500 transition cursor-pointer text-sm px-1"
                           >
                             🗑️
                           </button>
                         )}
+
                       </div>
                     </div>
 
@@ -1246,207 +2129,422 @@ export default function HomePage() {
 
                     {post.image_url && (
                       <img
-                        src={post.image_url}
+                        src={
+                          post.image_url
+                        }
                         alt=""
                         className="w-full max-h-[420px] object-cover rounded-2xl border border-gray-100"
                       />
                     )}
 
                     <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-2 border-t border-gray-50">
+
                       <button
-                        onClick={() => handleToggleLike(post.id, isLiked)}
+                        onClick={() =>
+                          handleToggleLike(
+                            post.id,
+                            isLiked
+                          )
+                        }
                         className={`flex items-center gap-1.5 transition cursor-pointer font-bold ${
-                          isLiked ? "text-pink-600" : "text-gray-500 hover:text-pink-600"
+                          isLiked
+                            ? "text-pink-600"
+                            : "text-gray-500 hover:text-pink-600"
                         }`}
                       >
-                        <span className="text-sm">{isLiked ? "💖" : "🤍"}</span>
-                        <span>{likesOnPost}</span>
+                        <span className="text-sm">
+                          {isLiked
+                            ? "💖"
+                            : "🤍"}
+                        </span>
+
+                        <span>
+                          {likesOnPost}
+                        </span>
                       </button>
+
                       <button
-                        onClick={() => toggleComments(post.id)}
+                        onClick={() =>
+                          toggleComments(
+                            post.id
+                          )
+                        }
                         className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer"
                       >
-                        💬 {isCommentsOpen ? "Скрыть" : "Комментировать"}
-                        {allPostComments.length > 0 && " (" + allPostComments.length + ")"}
+                        💬{" "}
+                        {isCommentsOpen
+                          ? "Скрыть"
+                          : "Комментировать"}
+
+                        {allPostComments.length >
+                          0 &&
+                          " (" +
+                            allPostComments.length +
+                            ")"}
                       </button>
+
                       <button
-                        onClick={() => openRepostModal(post.id)}
+                        onClick={() =>
+                          openRepostModal(
+                            post.id
+                          )
+                        }
                         className="flex items-center gap-1 hover:text-gray-600 transition cursor-pointer"
                       >
                         📤 Отправить в ЛС
                       </button>
+
                     </div>
 
                     {isCommentsOpen && (
                       <div className="pt-3 border-t border-gray-50 space-y-3">
-                        {topLevelComments.length === 0 ? (
+
+                        {topLevelComments.length ===
+                        0 ? (
                           <p className="text-[11px] text-gray-400 italic">
                             Пока нет комментариев. Будьте первым!
                           </p>
                         ) : (
                           <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                            {topLevelComments.map((comment) => {
-                              const replies = getReplies(comment.id);
-                              const isReplying = replyingTo[comment.id];
-                              const isReplySubmitting = submittingReply.has(comment.id);
 
-                              return (
-                                <div key={comment.id} className="space-y-2">
-                                  <div className="flex items-start gap-2.5">
-                                    <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
-                                      {comment.authorName.slice(0, 2)}
-                                    </div>
-                                    <div className="flex-1">
-                                      <div className="bg-gray-50 rounded-2xl px-3 py-2">
-                                        <div className="flex items-baseline gap-2">
-                                          <span className="text-[11px] font-bold text-gray-900">
-                                            {comment.authorName}
-                                          </span>
-                                          <span className="text-[9px] text-gray-400">
-                                            {new Date(comment.created_at).toLocaleTimeString([], {
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            })}
-                                          </span>
-                                        </div>
-                                        {comment.content && (
-                                          <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
-                                            {comment.content}
-                                          </p>
-                                        )}
-                                        {comment.image_url && (
-                                          <img
-                                            src={comment.image_url}
-                                            alt=""
-                                            className="mt-1.5 max-h-40 rounded-xl object-cover border border-gray-100"
-                                          />
+                            {topLevelComments.map(
+                              (comment) => {
+
+                                const replies =
+                                  getReplies(
+                                    comment.id
+                                  );
+
+                                const isReplying =
+                                  replyingTo[
+                                    comment.id
+                                  ];
+
+                                const isReplySubmitting =
+                                  submittingReply.has(
+                                    comment.id
+                                  );
+
+                                return (
+                                  <div
+                                    key={
+                                      comment.id
+                                    }
+                                    className="space-y-2"
+                                  >
+
+                                    <div className="flex items-start gap-2.5">
+
+                                      <div className="w-7 h-7 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
+                                        {comment.authorName.slice(
+                                          0,
+                                          2
                                         )}
                                       </div>
 
-                                      <button
-                                        onClick={() =>
-                                          isReplying ? cancelReply(comment.id) : startReply(comment.id)
-                                        }
-                                        className="text-[10px] text-gray-400 hover:text-pink-500 font-bold mt-1 ml-1 cursor-pointer"
-                                      >
-                                        {isReplying ? "Отменить" : "Ответить"}
-                                      </button>
+                                      <div className="flex-1">
 
-                                      {replies.length > 0 && (
-                                        <div className="mt-2 ml-2 pl-3 border-l-2 border-gray-100 space-y-2">
-                                          {replies.map((reply) => (
-                                            <div key={reply.id} className="flex items-start gap-2">
-                                              <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[9px] uppercase shrink-0">
-                                                {reply.authorName.slice(0, 2)}
-                                              </div>
-                                              <div className="bg-gray-50 rounded-2xl px-3 py-1.5 flex-1">
-                                                <div className="flex items-baseline gap-2">
-                                                  <span className="text-[10px] font-bold text-gray-900">
-                                                    {reply.authorName}
-                                                  </span>
-                                                  <span className="text-[9px] text-gray-400">
-                                                    {new Date(reply.created_at).toLocaleTimeString([], {
-                                                      hour: "2-digit",
-                                                      minute: "2-digit",
-                                                    })}
-                                                  </span>
+                                        <div className="bg-gray-50 rounded-2xl px-3 py-2">
+
+                                          <div className="flex items-baseline gap-2">
+                                            <span className="text-[11px] font-bold text-gray-900">
+                                              {comment.authorName}
+                                            </span>
+
+                                            <span className="text-[9px] text-gray-400">
+                                              {new Date(
+                                                comment.created_at
+                                              ).toLocaleTimeString(
+                                                [],
+                                                {
+                                                  hour: "2-digit",
+                                                  minute:
+                                                    "2-digit",
+                                                }
+                                              )}
+                                            </span>
+                                          </div>
+
+                                          {comment.content && (
+                                            <p className="text-[11px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                              {comment.content}
+                                            </p>
+                                          )}
+
+                                          {comment.image_url && (
+                                            <img
+                                              src={
+                                                comment.image_url
+                                              }
+                                              alt=""
+                                              className="mt-1.5 max-h-40 rounded-xl object-cover border border-gray-100"
+                                            />
+                                          )}
+
+                                        </div>
+
+                                        <button
+                                          onClick={() =>
+                                            isReplying
+                                              ? cancelReply(
+                                                  comment.id
+                                                )
+                                              : startReply(
+                                                  comment.id
+                                                )
+                                          }
+                                          className="text-[10px] text-gray-400 hover:text-pink-500 font-bold mt-1 ml-1 cursor-pointer"
+                                        >
+                                          {isReplying
+                                            ? "Отменить"
+                                            : "Ответить"}
+                                        </button>
+
+                                        {replies.length >
+                                          0 && (
+                                          <div className="mt-2 ml-2 pl-3 border-l-2 border-gray-100 space-y-2">
+
+                                            {replies.map(
+                                              (
+                                                reply
+                                              ) => (
+                                                <div
+                                                  key={
+                                                    reply.id
+                                                  }
+                                                  className="flex items-start gap-2"
+                                                >
+
+                                                  <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[9px] uppercase shrink-0">
+                                                    {reply.authorName.slice(
+                                                      0,
+                                                      2
+                                                    )}
+                                                  </div>
+
+                                                  <div className="bg-gray-50 rounded-2xl px-3 py-1.5 flex-1">
+
+                                                    <div className="flex items-baseline gap-2">
+                                                      <span className="text-[10px] font-bold text-gray-900">
+                                                        {reply.authorName}
+                                                      </span>
+
+                                                      <span className="text-[9px] text-gray-400">
+                                                        {new Date(
+                                                          reply.created_at
+                                                        ).toLocaleTimeString(
+                                                          [],
+                                                          {
+                                                            hour: "2-digit",
+                                                            minute:
+                                                              "2-digit",
+                                                          }
+                                                        )}
+                                                      </span>
+                                                    </div>
+
+                                                    <p className="text-[10px] text-gray-700 mt-0.5 whitespace-pre-wrap">
+                                                      {
+                                                        reply.content
+                                                      }
+                                                    </p>
+
+                                                  </div>
                                                 </div>
-                                                <p className="text-[10px] text-gray-700 mt-0.5 whitespace-pre-wrap">
-                                                  {reply.content}
-                                                </p>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
+                                              )
+                                            )}
 
-                                      {isReplying && (
-                                        <div className="flex items-center gap-2 mt-2 ml-2">
-                                          <input
-                                            type="text"
-                                            value={replyDrafts[comment.id] || ""}
-                                            onChange={(e) =>
-                                              handleReplyDraftChange(comment.id, e.target.value)
-                                            }
-                                            onKeyDown={(e) =>
-                                              e.key === "Enter" && handleAddReply(post.id, comment.id)
-                                            }
-                                            placeholder={"Ответить " + comment.authorName + "..."}
-                                            className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-1.5 text-[10px] focus:outline-none focus:border-pink-300"
-                                          />
-                                          <button
-                                            onClick={() => handleAddReply(post.id, comment.id)}
-                                            disabled={
-                                              isReplySubmitting || !(replyDrafts[comment.id] || "").trim()
-                                            }
-                                            className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[10px] font-bold px-3 py-1.5 rounded-2xl transition cursor-pointer shrink-0"
-                                          >
-                                            {isReplySubmitting ? "..." : "Отправить"}
-                                          </button>
-                                        </div>
-                                      )}
+                                          </div>
+                                        )}
+
+                                        {isReplying && (
+                                          <div className="flex items-center gap-2 mt-2 ml-2">
+
+                                            <input
+                                              type="text"
+                                              value={
+                                                replyDrafts[
+                                                  comment.id
+                                                ] || ""
+                                              }
+                                              onChange={(
+                                                e
+                                              ) =>
+                                                handleReplyDraftChange(
+                                                  comment.id,
+                                                  e.target
+                                                    .value
+                                                )
+                                              }
+                                              onKeyDown={(
+                                                e
+                                              ) =>
+                                                e.key ===
+                                                  "Enter" &&
+                                                handleAddReply(
+                                                  post.id,
+                                                  comment.id
+                                                )
+                                              }
+                                              placeholder={
+                                                "Ответить " +
+                                                comment.authorName +
+                                                "..."
+                                              }
+                                              className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-1.5 text-[10px] focus:outline-none focus:border-pink-300"
+                                            />
+
+                                            <button
+                                              onClick={() =>
+                                                handleAddReply(
+                                                  post.id,
+                                                  comment.id
+                                                )
+                                              }
+                                              disabled={
+                                                isReplySubmitting ||
+                                                !(
+                                                  replyDrafts[
+                                                    comment.id
+                                                  ] ||
+                                                  ""
+                                                ).trim()
+                                              }
+                                              className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[10px] font-bold px-3 py-1.5 rounded-2xl transition cursor-pointer shrink-0"
+                                            >
+                                              {isReplySubmitting
+                                                ? "..."
+                                                : "Отправить"}
+                                            </button>
+
+                                          </div>
+                                        )}
+
+                                      </div>
                                     </div>
+
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              }
+                            )}
+
                           </div>
                         )}
 
-                        {commentImagePreviews[post.id] && (
+                        {commentImagePreviews[
+                          post.id
+                        ] && (
                           <div className="relative inline-block">
+
                             <img
-                              src={commentImagePreviews[post.id]}
+                              src={
+                                commentImagePreviews[
+                                  post.id
+                                ]
+                              }
                               alt="Превью фото"
                               className="h-16 w-16 object-cover rounded-xl border border-gray-100"
                             />
+
                             <button
                               type="button"
-                              onClick={() => handleRemoveCommentImage(post.id)}
+                              onClick={() =>
+                                handleRemoveCommentImage(
+                                  post.id
+                                )
+                              }
                               className="absolute -top-2 -right-2 bg-black/70 hover:bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center cursor-pointer"
                             >
                               ✕
                             </button>
+
                           </div>
                         )}
 
                         <div className="flex items-center gap-2">
+
                           <input
                             type="text"
-                            value={commentDrafts[post.id] || ""}
-                            onChange={(e) => handleCommentDraftChange(post.id, e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && handleAddComment(post.id)}
+                            value={
+                              commentDrafts[
+                                post.id
+                              ] || ""
+                            }
+                            onChange={(e) =>
+                              handleCommentDraftChange(
+                                post.id,
+                                e.target.value
+                              )
+                            }
+                            onKeyDown={(e) =>
+                              e.key === "Enter" &&
+                              handleAddComment(
+                                post.id
+                              )
+                            }
                             placeholder="Написать комментарий..."
                             className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl px-3 py-2 text-[11px] focus:outline-none focus:border-pink-300"
                           />
+
                           <button
                             type="button"
-                            onClick={() => document.getElementById("comment-img-" + post.id)?.click()}
+                            onClick={() =>
+                              document
+                                .getElementById(
+                                  "comment-img-" +
+                                    post.id
+                                )
+                                ?.click()
+                            }
                             title="Прикрепить фото"
                             className="text-gray-400 hover:text-pink-500 transition cursor-pointer text-base shrink-0"
                           >
                             📷
                           </button>
+
                           <input
-                            id={"comment-img-" + post.id}
+                            id={
+                              "comment-img-" +
+                              post.id
+                            }
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => handleCommentImageSelect(post.id, e)}
+                            onChange={(e) =>
+                              handleCommentImageSelect(
+                                post.id,
+                                e
+                              )
+                            }
                           />
+
                           <button
-                            onClick={() => handleAddComment(post.id)}
+                            onClick={() =>
+                              handleAddComment(
+                                post.id
+                              )
+                            }
                             disabled={
                               isCommentSubmitting ||
-                              (!(commentDrafts[post.id] || "").trim() && !commentImageFiles[post.id])
+                              (!(commentDrafts[
+                                post.id
+                              ] || "").trim() &&
+                                !commentImageFiles[
+                                  post.id
+                                ])
                             }
                             className="bg-pink-500 hover:bg-pink-600 disabled:opacity-40 text-white text-[11px] font-bold px-3.5 py-2 rounded-2xl transition cursor-pointer shrink-0"
                           >
-                            {isCommentSubmitting ? "..." : "Отправить"}
+                            {isCommentSubmitting
+                              ? "..."
+                              : "Отправить"}
                           </button>
+
                         </div>
+
                       </div>
                     )}
+
                   </div>
                 );
               })
@@ -1454,175 +2552,303 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ПРАВАЯ КОЛОНКА: AI ПОМОЩНИК */}
+        {/* ПРАВАЯ КОЛОНКА */}
+
         <aside className="col-span-12 md:col-span-3 space-y-4">
+
           <div className="bg-[#B3A1C9] rounded-3xl p-5 text-white shadow-xs sticky top-4 space-y-3">
+
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-black flex items-center gap-1">🤖 AI Помощник</h3>
-              <span className="bg-white/30 text-[9px] font-bold px-2 py-0.5 rounded-full">Онлайн</span>
+
+              <h3 className="text-xs font-black flex items-center gap-1">
+                🤖 AI Помощник
+              </h3>
+
+              <span className="bg-white/30 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                Онлайн
+              </span>
+
             </div>
+
             <p className="text-[11px] leading-relaxed opacity-90">
               Помогу оформить профиль и подберу первое сообщение.
             </p>
+
             <button
-              onClick={() => setIsAIModalOpen(true)}
+              onClick={() =>
+                setIsAIModalOpen(
+                  true
+                )
+              }
               className="w-full bg-white/30 hover:bg-white/40 text-white font-bold py-2.5 rounded-xl text-xs backdrop-blur-md transition cursor-pointer text-center"
             >
               Открыть AI
             </button>
+
           </div>
+
         </aside>
       </main>
 
       <AIAssistantModal
         isOpen={isAIModalOpen}
-        onClose={() => setIsAIModalOpen(false)}
+        onClose={() =>
+          setIsAIModalOpen(false)
+        }
       />
 
-      {activeGroup && activeStory && (
-        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-          <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
-            <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
-              {activeGroup.stories.map((s, idx) => (
-                <div key={s.id} className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden">
-                  <div
-                    className="h-full bg-white"
-                    style={{
-                      width:
-                        idx < viewerStoryIndex
-                          ? "100%"
-                          : idx === viewerStoryIndex
-                          ? viewerProgress + "%"
-                          : "0%",
-                      transition: idx === viewerStoryIndex ? "none" : undefined,
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+      {/* ПРОСМОТР ИСТОРИИ */}
 
-            <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <img
-                  src={activeGroup.avatar}
-                  alt={activeGroup.name}
-                  className="w-8 h-8 rounded-full object-cover border border-white/50"
-                />
-                <span className="text-white text-xs font-bold drop-shadow">
-                  {activeGroup.name}
-                </span>
+      {activeGroup &&
+        activeStory && (
+          <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+
+            <div className="relative w-full max-w-md h-full sm:h-[90vh] sm:rounded-3xl overflow-hidden bg-black">
+
+              <div className="absolute top-3 left-3 right-3 z-30 flex gap-1.5">
+
+                {activeGroup.stories.map(
+                  (s, idx) => (
+                    <div
+                      key={s.id}
+                      className="h-1 flex-1 rounded-full bg-white/30 overflow-hidden"
+                    >
+                      <div
+                        className="h-full bg-white"
+                        style={{
+                          width:
+                            idx <
+                            viewerStoryIndex
+                              ? "100%"
+                              : idx ===
+                                viewerStoryIndex
+                              ? viewerProgress +
+                                "%"
+                              : "0%",
+                          transition:
+                            idx ===
+                            viewerStoryIndex
+                              ? "none"
+                              : undefined,
+                        }}
+                      />
+                    </div>
+                  )
+                )}
+
               </div>
 
-              <button
-                onClick={closeViewer}
-                className="text-white text-xl font-bold px-2 drop-shadow cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+              <div className="absolute top-7 left-3 right-3 z-30 flex items-center justify-between">
 
-            <div className="w-full h-full flex items-center justify-center">
-              {activeStory.media_type === "video" ? (
-                <video
-                  key={activeStory.id}
-                  src={activeStory.media_url}
-                  className="w-full h-full object-contain"
-                  autoPlay
-                  playsInline
-                  onEnded={goToNextStory}
-                />
-              ) : (
-                <img
-                  key={activeStory.id}
-                  src={activeStory.media_url}
-                  alt=""
-                  className="w-full h-full object-contain"
-                />
-              )}
-            </div>
+                <div className="flex items-center gap-2">
 
-            <div
-              onClick={goToPrevStory}
-              className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
-            />
-            <div
-              onClick={goToNextStory}
-              className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
-            />
+                  <img
+                    src={
+                      activeGroup.avatar
+                    }
+                    alt={
+                      activeGroup.name
+                    }
+                    className="w-8 h-8 rounded-full object-cover border border-white/50"
+                  />
+
+                  <span className="text-white text-xs font-bold drop-shadow">
+                    {activeGroup.name}
+                  </span>
+
+                </div>
+
+                <button
+                  onClick={
+                    closeViewer
+                  }
+                  className="text-white text-xl font-bold px-2 drop-shadow cursor-pointer"
+                >
+                  ✕
+                </button>
+
+              </div>
+
+              <div className="w-full h-full flex items-center justify-center">
+
+                {activeStory.media_type ===
+                "video" ? (
+                  <video
+                    key={
+                      activeStory.id
+                    }
+                    src={
+                      activeStory.media_url
+                    }
+                    className="w-full h-full object-contain"
+                    autoPlay
+                    playsInline
+                    onEnded={
+                      goToNextStory
+                    }
+                  />
+                ) : (
+                  <img
+                    key={
+                      activeStory.id
+                    }
+                    src={
+                      activeStory.media_url
+                    }
+                    alt=""
+                    className="w-full h-full object-contain"
+                  />
+                )}
+
+              </div>
+
+              <div
+                onClick={
+                  goToPrevStory
+                }
+                className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+              />
+
+              <div
+                onClick={
+                  goToNextStory
+                }
+                className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20"
+              />
+
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {repostPostId && repostPost && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={closeRepostModal}
-        >
+      {/* РЕПОСТ */}
+
+      {repostPostId &&
+        repostPost && (
           <div
-            className="bg-white rounded-3xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={
+              closeRepostModal
+            }
           >
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-black text-gray-900">Отправить в сообщения</h3>
-              <button
-                onClick={closeRepostModal}
-                className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="p-4 bg-gray-50 border-b border-gray-100">
-              <p className="text-[11px] text-gray-500 line-clamp-2">
-                {repostPost.content}
-              </p>
-            </div>
+            <div
+              className="bg-white rounded-3xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden"
+              onClick={(e) =>
+                e.stopPropagation()
+              }
+            >
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {isLoadingRepostTargets ? (
-                <p className="text-xs text-gray-400 text-center py-6">Загрузка мэтчей...</p>
-              ) : repostTargets.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-6">
-                  Пока нет мэтчей, кому можно отправить
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+
+                <h3 className="text-sm font-black text-gray-900">
+                  Отправить в сообщения
+                </h3>
+
+                <button
+                  onClick={
+                    closeRepostModal
+                  }
+                  className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+
+              </div>
+
+              <div className="p-4 bg-gray-50 border-b border-gray-100">
+
+                <p className="text-[11px] text-gray-500 line-clamp-2">
+                  {
+                    repostPost.content
+                  }
                 </p>
-              ) : (
-                repostTargets.map((target) => {
-                  const isSent = repostSentTo.has(target.matchId);
-                  const isSending = sendingRepostTo === target.matchId;
 
-                  return (
-                    <div
-                      key={target.matchId}
-                      className="flex items-center justify-between gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
-                    >
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={target.avatar}
-                          alt={target.name}
-                          className="w-9 h-9 rounded-full object-cover"
-                        />
-                        <span className="text-xs font-bold text-gray-900">{target.name}</span>
-                      </div>
+              </div>
 
-                      <button
-                        onClick={() => handleSendRepost(target)}
-                        disabled={isSending || isSent}
-                        className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition cursor-pointer ${
-                          isSent
-                            ? "bg-emerald-50 text-emerald-600"
-                            : "bg-pink-500 hover:bg-pink-600 text-white disabled:opacity-50"
-                        }`}
-                      >
-                        {isSent ? "Отправлено ✓" : isSending ? "..." : "Отправить"}
-                      </button>
-                    </div>
-                  );
-                })
-              )}
+              <div className="flex-1 overflow-y-auto p-3 space-y-1">
+
+                {isLoadingRepostTargets ? (
+                  <p className="text-xs text-gray-400 text-center py-6">
+                    Загрузка мэтчей...
+                  </p>
+                ) : repostTargets.length ===
+                  0 ? (
+                  <p className="text-xs text-gray-400 text-center py-6">
+                    Пока нет мэтчей, кому можно отправить
+                  </p>
+                ) : (
+                  repostTargets.map(
+                    (target) => {
+                      const isSent =
+                        repostSentTo.has(
+                          target.matchId
+                        );
+
+                      const isSending =
+                        sendingRepostTo ===
+                        target.matchId;
+
+                      return (
+                        <div
+                          key={
+                            target.matchId
+                          }
+                          className="flex items-center justify-between gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
+                        >
+
+                          <div className="flex items-center gap-3">
+
+                            <img
+                              src={
+                                target.avatar
+                              }
+                              alt={
+                                target.name
+                              }
+                              className="w-9 h-9 rounded-full object-cover"
+                            />
+
+                            <span className="text-xs font-bold text-gray-900">
+                              {target.name}
+                            </span>
+
+                          </div>
+
+                          <button
+                            onClick={() =>
+                              handleSendRepost(
+                                target
+                              )
+                            }
+                            disabled={
+                              isSending ||
+                              isSent
+                            }
+                            className={`text-[11px] font-bold px-3 py-1.5 rounded-xl transition cursor-pointer ${
+                              isSent
+                                ? "bg-emerald-50 text-emerald-600"
+                                : "bg-pink-500 hover:bg-pink-600 text-white disabled:opacity-50"
+                            }`}
+                          >
+                            {isSent
+                              ? "Отправлено ✓"
+                              : isSending
+                              ? "..."
+                              : "Отправить"}
+                          </button>
+
+                        </div>
+                      );
+                    }
+                  )
+                )}
+
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        )}
+
     </div>
   );
 }
