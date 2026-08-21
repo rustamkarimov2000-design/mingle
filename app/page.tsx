@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AIAssistantModal from "@/components/AIAssistantModal";
-import Script from "next/script";
 
 interface Comment {
   id: string;
@@ -671,6 +670,30 @@ export default function HomePage() {
     };
   }, [onTelegramAuth]);
 
+  // Кнопку Telegram Login монтируем вручную в конкретный div-контейнер.
+  // next/script вставляет тег <script> не строго в место в JSX-дереве
+  // (виджет мог "уехать" в конец <body>, из-за чего кнопка не была видна
+  // рядом с "Войти"), поэтому создаём и вставляем <script> сами.
+  const telegramWidgetRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (displayName !== "Гость" || !telegramWidgetRef.current) return;
+
+    telegramWidgetRef.current.innerHTML = "";
+
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.async = true;
+    script.setAttribute("data-telegram-login", "MingleRuBot");
+    script.setAttribute("data-size", "medium");
+    script.setAttribute("data-request-access", "write");
+    script.setAttribute("data-userpic", "false");
+    script.setAttribute("data-onauth", "onTelegramAuth");
+    script.setAttribute("data-radius", "10");
+
+    telegramWidgetRef.current.appendChild(script);
+  }, [displayName]);
+
   // =========================================================
   // UPLOAD IMAGE
   // =========================================================
@@ -1195,17 +1218,8 @@ export default function HomePage() {
             </>
           ) : (
             <div className="flex items-center gap-2">
-              {/* КНОПКА ВХОДА ЧЕРЕЗ TELEGRAM */}
-              <Script
-                src="https://telegram.org/js/telegram-widget.js?22"
-                strategy="afterInteractive"
-                data-telegram-login="MingleRuBot"
-                data-size="medium"
-                data-request-access="write"
-                data-userpic="false"
-                data-onauth="onTelegramAuth"
-                data-radius="10"
-              />
+              {/* КНОПКА ВХОДА ЧЕРЕЗ TELEGRAM — монтируется вручную через useEffect выше */}
+              <div ref={telegramWidgetRef} />
 
               {/* СТАРАЯ КНОПКА ВХОДА ПО ПОЧТЕ (оставляем на всякий случай) */}
               <Link
