@@ -677,7 +677,7 @@ export default function HomePage() {
   const telegramWidgetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (displayName !== "Гость" || !telegramWidgetRef.current) return;
+    if (!isLoaded || displayName !== "Гость" || !telegramWidgetRef.current) return;
 
     telegramWidgetRef.current.innerHTML = "";
 
@@ -692,7 +692,7 @@ export default function HomePage() {
     script.setAttribute("data-radius", "10");
 
     telegramWidgetRef.current.appendChild(script);
-  }, [displayName]);
+  }, [isLoaded, displayName]);
 
   // =========================================================
   // UPLOAD IMAGE
