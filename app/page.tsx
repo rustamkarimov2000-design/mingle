@@ -826,14 +826,30 @@ export default function HomePage() {
         // upsert по (post_id, user_id) — надёжнее ручного insert/update:
         // не важно, была ли раньше реакция у этого пользователя или нет,
         // запись гарантированно останется только одна на пользователя.
-        const { error } = await supabase
+        // .select() нужен, чтобы отличить "реально обновилось" от
+        // "RLS молча заблокировал UPDATE" (Supabase в этом случае НЕ
+        // возвращает ошибку — только пустой массив).
+        const { data, error } = await supabase
           .from("post_likes")
           .upsert(
             { post_id: postId, user_id: userId, reaction_type: reactionType },
             { onConflict: "post_id,user_id" }
-          );
+          )
+          .select();
 
         if (error) throw error;
+
+        if (!data || data.length === 0) {
+          console.error(
+            "Реакция не сохранилась — вероятно, у post_likes нет RLS-политики на UPDATE."
+          );
+          alert(
+            "Реакция не сохранилась. В Supabase на таблице post_likes отсутствует UPDATE-политика.\n\n" +
+              "Добавьте:\ncreate policy \"Users can update own reactions\"\non post_likes for update\nusing (auth.uid() = user_id)\nwith check (auth.uid() = user_id);"
+          );
+          fetchPosts();
+          return;
+        }
       }
     } catch (error) {
       console.error("Ошибка обновления реакции:", error);
@@ -1564,6 +1580,12 @@ export default function HomePage() {
                           </h4>
 
                           <span className="text-[10px] text-gray-400">
+                            {new Date(post.created_at).toLocaleDateString("ru-RU", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                            {" · "}
                             {new Date(post.created_at).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
