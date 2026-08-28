@@ -27,7 +27,7 @@ interface Post {
   profiles?: {
     name: string;
   };
-  post_likes?: { user_id: string; reaction_type?: string }[];
+  post_likes?: { user_id: string; reaction_type?: string; authorName?: string }[];
 }
 
 interface StoryItem {
@@ -94,6 +94,7 @@ export default function HomePage() {
 
   // Реакции на посты (набор эмодзи вместо одного лайка)
   const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
+  const [reactionsListPostId, setReactionsListPostId] = useState<string | null>(null);
   const REACTION_OPTIONS: { type: string; emoji: string }[] = [
     { type: "love", emoji: "💖" },
     { type: "fire", emoji: "🔥" },
@@ -564,6 +565,17 @@ export default function HomePage() {
       const likesData = likesRes.data || [];
       const commentsData = commentsRes.data || [];
 
+      // Подтягиваем имена тех, кто оставил реакции (может отличаться от
+      // авторов постов/комментариев)
+      const reactorIds = Array.from(new Set(likesData.map((l) => l.user_id)));
+      const missingReactorIds = reactorIds.filter((id) => !profilesMap.has(id));
+
+      const { data: reactorProfiles } = missingReactorIds.length
+        ? await supabase.from("profiles").select("id, name").in("id", missingReactorIds)
+        : { data: [] as { id: string; name: string }[] };
+
+      (reactorProfiles || []).forEach((p) => profilesMap.set(p.id, p.name));
+
       const commenterIds = Array.from(new Set(commentsData.map((c) => c.user_id)));
 
       const { data: commenterProfiles } = commenterIds.length
@@ -594,7 +606,12 @@ export default function HomePage() {
         profiles: {
           name: profilesMap.get(post.user_id) || "Пользователь",
         },
-        post_likes: likesData.filter((l) => l.post_id === post.id),
+        post_likes: likesData
+          .filter((l) => l.post_id === post.id)
+          .map((l) => ({
+            ...l,
+            authorName: profilesMap.get(l.user_id) || "Пользователь",
+          })),
       }));
 
       setPosts(formattedPosts);
@@ -776,7 +793,8 @@ export default function HomePage() {
     const existing = post?.post_likes?.find((l) => l.user_id === userId);
     const isRemoving = existing?.reaction_type === reactionType;
 
-    // Оптимистичное обновление UI
+    // Оптимистичное обновление UI — трогаем только запись ТЕКУЩЕГО
+    // пользователя, все остальные реакции остаются как были.
     setPosts((prevPosts) =>
       prevPosts.map((p) => {
         if (p.id !== postId) return p;
@@ -784,7 +802,10 @@ export default function HomePage() {
         const others = (p.post_likes || []).filter((l) => l.user_id !== userId);
         const updated = isRemoving
           ? others
-          : [...others, { user_id: userId, reaction_type: reactionType }];
+          : [
+              ...others,
+              { user_id: userId, reaction_type: reactionType, authorName: displayName },
+            ];
 
         return { ...p, post_likes: updated };
       })
@@ -801,20 +822,16 @@ export default function HomePage() {
           .eq("user_id", userId);
 
         if (error) throw error;
-      } else if (existing) {
+      } else {
+        // upsert по (post_id, user_id) — надёжнее ручного insert/update:
+        // не важно, была ли раньше реакция у этого пользователя или нет,
+        // запись гарантированно останется только одна на пользователя.
         const { error } = await supabase
           .from("post_likes")
-          .update({ reaction_type: reactionType })
-          .eq("post_id", postId)
-          .eq("user_id", userId);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("post_likes").insert({
-          post_id: postId,
-          user_id: userId,
-          reaction_type: reactionType,
-        });
+          .upsert(
+            { post_id: postId, user_id: userId, reaction_type: reactionType },
+            { onConflict: "post_id,user_id" }
+          );
 
         if (error) throw error;
       }
@@ -1587,7 +1604,7 @@ export default function HomePage() {
                     )}
 
                     <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-2 border-t border-gray-50">
-                      <div className="relative">
+                      <div className="relative flex items-center gap-1">
                         <button
                           onClick={() =>
                             setOpenReactionPickerId((prev) => (prev === post.id ? null : post.id))
@@ -1603,8 +1620,17 @@ export default function HomePage() {
                               ? topReactionEmojis.join("")
                               : "🤍"}
                           </span>
-                          <span>{totalReactions}</span>
                         </button>
+
+                        {totalReactions > 0 && (
+                          <button
+                            onClick={() => setReactionsListPostId(post.id)}
+                            className="hover:underline cursor-pointer"
+                            title="Показать, кто отреагировал"
+                          >
+                            {totalReactions}
+                          </button>
+                        )}
 
                         {openReactionPickerId === post.id && (
                           <>
@@ -1925,6 +1951,52 @@ export default function HomePage() {
 
             <div onClick={goToPrevStory} className="absolute left-0 top-0 bottom-0 w-1/3 cursor-pointer z-20" />
             <div onClick={goToNextStory} className="absolute right-0 top-0 bottom-0 w-1/3 cursor-pointer z-20" />
+          </div>
+        </div>
+      )}
+
+      {/* КТО ОТРЕАГИРОВАЛ */}
+
+      {reactionsListPostId && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setReactionsListPostId(null)}
+        >
+          <div
+            className="bg-white rounded-3xl w-full max-w-sm max-h-[70vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-sm font-black text-gray-900">Реакции</h3>
+
+              <button
+                onClick={() => setReactionsListPostId(null)}
+                className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {(posts.find((p) => p.id === reactionsListPostId)?.post_likes || []).map((like) => (
+                <div
+                  key={like.user_id}
+                  className="flex items-center gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
+                    {(like.authorName || "П").slice(0, 2)}
+                  </div>
+
+                  <span className="text-xs font-bold text-gray-900 flex-1">
+                    {like.authorName || "Пользователь"}
+                  </span>
+
+                  <span className="text-lg">
+                    {REACTION_OPTIONS.find((r) => r.type === like.reaction_type)?.emoji || "👍"}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
