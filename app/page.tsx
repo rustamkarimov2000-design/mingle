@@ -27,7 +27,7 @@ interface Post {
   profiles?: {
     name: string;
   };
-  post_likes?: { user_id: string }[];
+  post_likes?: { user_id: string; reaction_type?: string }[];
 }
 
 interface StoryItem {
@@ -91,6 +91,16 @@ export default function HomePage() {
 
   const [commentImageFiles, setCommentImageFiles] = useState<Record<string, File | null>>({});
   const [commentImagePreviews, setCommentImagePreviews] = useState<Record<string, string>>({});
+
+  // Реакции на посты (набор эмодзи вместо одного лайка)
+  const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
+  const REACTION_OPTIONS: { type: string; emoji: string }[] = [
+    { type: "love", emoji: "💖" },
+    { type: "fire", emoji: "🔥" },
+    { type: "haha", emoji: "😂" },
+    { type: "wow", emoji: "😮" },
+    { type: "like", emoji: "👍" },
+  ];
 
   const [repostPostId, setRepostPostId] = useState<string | null>(null);
   const [repostTargets, setRepostTargets] = useState<RepostTarget[]>([]);
@@ -542,7 +552,7 @@ export default function HomePage() {
 
       const [profilesRes, likesRes, commentsRes] = await Promise.all([
         supabase.from("profiles").select("id, name").in("id", userIds),
-        supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
+        supabase.from("post_likes").select("post_id, user_id, reaction_type").in("post_id", postIds),
         supabase
           .from("post_comments")
           .select("id, post_id, user_id, content, created_at, parent_comment_id, image_url")
@@ -753,35 +763,48 @@ export default function HomePage() {
   };
 
   // =========================================================
-  // POST LIKE
+  // POST REACTIONS
   // =========================================================
 
-  const handleToggleLike = async (postId: string, isLiked: boolean) => {
+  const handleReact = async (postId: string, reactionType: string) => {
     if (!userId) {
       router.push("/auth/login");
       return;
     }
 
+    const post = posts.find((p) => p.id === postId);
+    const existing = post?.post_likes?.find((l) => l.user_id === userId);
+    const isRemoving = existing?.reaction_type === reactionType;
+
+    // Оптимистичное обновление UI
     setPosts((prevPosts) =>
-      prevPosts.map((post) => {
-        if (post.id === postId) {
-          const currentLikes = post.post_likes || [];
-          const updatedLikes = isLiked
-            ? currentLikes.filter((like) => like.user_id !== userId)
-            : [...currentLikes, { user_id: userId }];
+      prevPosts.map((p) => {
+        if (p.id !== postId) return p;
 
-          return { ...post, post_likes: updatedLikes };
-        }
+        const others = (p.post_likes || []).filter((l) => l.user_id !== userId);
+        const updated = isRemoving
+          ? others
+          : [...others, { user_id: userId, reaction_type: reactionType }];
 
-        return post;
+        return { ...p, post_likes: updated };
       })
     );
 
+    setOpenReactionPickerId(null);
+
     try {
-      if (isLiked) {
+      if (isRemoving) {
         const { error } = await supabase
           .from("post_likes")
           .delete()
+          .eq("post_id", postId)
+          .eq("user_id", userId);
+
+        if (error) throw error;
+      } else if (existing) {
+        const { error } = await supabase
+          .from("post_likes")
+          .update({ reaction_type: reactionType })
           .eq("post_id", postId)
           .eq("user_id", userId);
 
@@ -790,12 +813,13 @@ export default function HomePage() {
         const { error } = await supabase.from("post_likes").insert({
           post_id: postId,
           user_id: userId,
+          reaction_type: reactionType,
         });
 
         if (error) throw error;
       }
     } catch (error) {
-      console.error("Ошибка обновления лайка:", error);
+      console.error("Ошибка обновления реакции:", error);
       fetchPosts();
     }
   };
@@ -1485,8 +1509,21 @@ export default function HomePage() {
               </div>
             ) : (
               posts.map((post) => {
-                const isLiked = (post.post_likes || []).some((like) => like.user_id === userId);
-                const likesOnPost = post.post_likes?.length || 0;
+                const postReactions = post.post_likes || [];
+                const myReaction = postReactions.find((l) => l.user_id === userId)?.reaction_type;
+                const totalReactions = postReactions.length;
+
+                // Топ-3 самых частых реакций для сводки на кнопке (как в Facebook)
+                const reactionCounts: Record<string, number> = {};
+                postReactions.forEach((l) => {
+                  const t = l.reaction_type || "like";
+                  reactionCounts[t] = (reactionCounts[t] || 0) + 1;
+                });
+                const topReactionEmojis = Object.entries(reactionCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 3)
+                  .map(([type]) => REACTION_OPTIONS.find((r) => r.type === type)?.emoji || "👍");
+
                 const allPostComments = commentsByPost[post.id] || [];
                 const topLevelComments = allPostComments.filter((c) => !c.parent_comment_id);
                 const isCommentsOpen = openComments.has(post.id);
@@ -1550,15 +1587,48 @@ export default function HomePage() {
                     )}
 
                     <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-2 border-t border-gray-50">
-                      <button
-                        onClick={() => handleToggleLike(post.id, isLiked)}
-                        className={`flex items-center gap-1.5 transition cursor-pointer font-bold ${
-                          isLiked ? "text-pink-600" : "text-gray-500 hover:text-pink-600"
-                        }`}
-                      >
-                        <span className="text-sm">{isLiked ? "💖" : "🤍"}</span>
-                        <span>{likesOnPost}</span>
-                      </button>
+                      <div className="relative">
+                        <button
+                          onClick={() =>
+                            setOpenReactionPickerId((prev) => (prev === post.id ? null : post.id))
+                          }
+                          className={`flex items-center gap-1.5 transition cursor-pointer font-bold ${
+                            myReaction ? "text-pink-600" : "text-gray-500 hover:text-pink-600"
+                          }`}
+                        >
+                          <span className="text-sm">
+                            {myReaction
+                              ? REACTION_OPTIONS.find((r) => r.type === myReaction)?.emoji
+                              : totalReactions > 0
+                              ? topReactionEmojis.join("")
+                              : "🤍"}
+                          </span>
+                          <span>{totalReactions}</span>
+                        </button>
+
+                        {openReactionPickerId === post.id && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-10"
+                              onClick={() => setOpenReactionPickerId(null)}
+                            />
+                            <div className="absolute bottom-full left-0 mb-2 bg-white rounded-full shadow-lg border border-gray-100 flex items-center gap-1 px-2 py-1.5 z-20">
+                              {REACTION_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.type}
+                                  onClick={() => handleReact(post.id, opt.type)}
+                                  title={opt.type}
+                                  className={`text-lg hover:scale-125 transition cursor-pointer ${
+                                    myReaction === opt.type ? "scale-125" : ""
+                                  }`}
+                                >
+                                  {opt.emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
 
                       <button
                         onClick={() => toggleComments(post.id)}
