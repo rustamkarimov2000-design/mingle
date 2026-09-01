@@ -95,6 +95,7 @@ export default function HomePage() {
   // Реакции на посты (набор эмодзи вместо одного лайка)
   const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
   const [reactionsListPostId, setReactionsListPostId] = useState<string | null>(null);
+  const [reactionsListFilter, setReactionsListFilter] = useState<string>("all");
   const REACTION_OPTIONS: { type: string; emoji: string }[] = [
     { type: "love", emoji: "💖" },
     { type: "fire", emoji: "🔥" },
@@ -1646,7 +1647,10 @@ export default function HomePage() {
 
                         {totalReactions > 0 && (
                           <button
-                            onClick={() => setReactionsListPostId(post.id)}
+                            onClick={() => {
+                              setReactionsListFilter("all");
+                              setReactionsListPostId(post.id);
+                            }}
                             className="hover:underline cursor-pointer"
                             title="Показать, кто отреагировал"
                           >
@@ -1979,49 +1983,95 @@ export default function HomePage() {
 
       {/* КТО ОТРЕАГИРОВАЛ */}
 
-      {reactionsListPostId && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setReactionsListPostId(null)}
-        >
+      {reactionsListPostId && (() => {
+        const allLikes = posts.find((p) => p.id === reactionsListPostId)?.post_likes || [];
+
+        // Считаем, сколько раз встречается каждый тип реакции — только для
+        // тех типов, что реально присутствуют, показываем вкладку
+        const countsByType: Record<string, number> = {};
+        allLikes.forEach((l) => {
+          const t = l.reaction_type || "like";
+          countsByType[t] = (countsByType[t] || 0) + 1;
+        });
+
+        const presentTypes = REACTION_OPTIONS.filter((opt) => countsByType[opt.type] > 0);
+
+        const filteredLikes =
+          reactionsListFilter === "all"
+            ? allLikes
+            : allLikes.filter((l) => (l.reaction_type || "like") === reactionsListFilter);
+
+        return (
           <div
-            className="bg-white rounded-3xl w-full max-w-sm max-h-[70vh] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={() => setReactionsListPostId(null)}
           >
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-black text-gray-900">Реакции</h3>
+            <div
+              className="bg-white rounded-3xl w-full max-w-sm max-h-[70vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-sm font-black text-gray-900">Реакции</h3>
 
-              <button
-                onClick={() => setReactionsListPostId(null)}
-                className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {(posts.find((p) => p.id === reactionsListPostId)?.post_likes || []).map((like) => (
-                <div
-                  key={like.user_id}
-                  className="flex items-center gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
+                <button
+                  onClick={() => setReactionsListPostId(null)}
+                  className="text-gray-400 hover:text-gray-700 text-lg font-bold cursor-pointer"
                 >
-                  <div className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
-                    {(like.authorName || "П").slice(0, 2)}
+                  ✕
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 px-3 pt-3 pb-1 overflow-x-auto border-b border-gray-100">
+                <button
+                  onClick={() => setReactionsListFilter("all")}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                    reactionsListFilter === "all"
+                      ? "bg-black text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  Все {allLikes.length}
+                </button>
+
+                {presentTypes.map((opt) => (
+                  <button
+                    key={opt.type}
+                    onClick={() => setReactionsListFilter(opt.type)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
+                      reactionsListFilter === opt.type
+                        ? "bg-black text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    <span>{opt.emoji}</span> {countsByType[opt.type]}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                {filteredLikes.map((like) => (
+                  <div
+                    key={like.user_id}
+                    className="flex items-center gap-3 p-2 rounded-2xl hover:bg-gray-50 transition"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gray-200 text-gray-600 font-bold flex items-center justify-center text-[10px] uppercase shrink-0">
+                      {(like.authorName || "П").slice(0, 2)}
+                    </div>
+
+                    <span className="text-xs font-bold text-gray-900 flex-1">
+                      {like.authorName || "Пользователь"}
+                    </span>
+
+                    <span className="text-lg">
+                      {REACTION_OPTIONS.find((r) => r.type === like.reaction_type)?.emoji || "👍"}
+                    </span>
                   </div>
-
-                  <span className="text-xs font-bold text-gray-900 flex-1">
-                    {like.authorName || "Пользователь"}
-                  </span>
-
-                  <span className="text-lg">
-                    {REACTION_OPTIONS.find((r) => r.type === like.reaction_type)?.emoji || "👍"}
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* REPOST MODAL */}
 
