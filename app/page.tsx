@@ -1627,36 +1627,43 @@ export default function HomePage() {
                     )}
 
                     <div className="flex items-center gap-4 text-xs font-medium text-gray-400 pt-2 border-t border-gray-50">
-                      <div className="relative flex items-center gap-1">
+                      <div className="relative flex items-center gap-1.5">
+                        {REACTION_OPTIONS.filter((opt) => reactionCounts[opt.type] > 0).map(
+                          (opt) => (
+                            <button
+                              key={opt.type}
+                              onClick={() => handleReact(post.id, opt.type)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setReactionsListFilter(opt.type);
+                                setReactionsListPostId(post.id);
+                              }}
+                              title={
+                                myReaction === opt.type
+                                  ? "Убрать реакцию"
+                                  : "Поставить " + opt.emoji
+                              }
+                              className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition cursor-pointer border ${
+                                myReaction === opt.type
+                                  ? "bg-pink-50 border-pink-300 text-pink-600"
+                                  : "bg-gray-50 border-gray-100 text-gray-600 hover:bg-gray-100"
+                              }`}
+                            >
+                              <span className="text-sm leading-none">{opt.emoji}</span>
+                              <span>{reactionCounts[opt.type]}</span>
+                            </button>
+                          )
+                        )}
+
                         <button
                           onClick={() =>
                             setOpenReactionPickerId((prev) => (prev === post.id ? null : post.id))
                           }
-                          className={`flex items-center gap-1.5 transition cursor-pointer font-bold ${
-                            myReaction ? "text-pink-600" : "text-gray-500 hover:text-pink-600"
-                          }`}
+                          title="Добавить реакцию"
+                          className="flex items-center justify-center w-6 h-6 rounded-full border border-gray-100 bg-gray-50 hover:bg-gray-100 text-gray-400 hover:text-pink-500 transition cursor-pointer text-sm"
                         >
-                          <span className="text-sm">
-                            {myReaction
-                              ? REACTION_OPTIONS.find((r) => r.type === myReaction)?.emoji
-                              : totalReactions > 0
-                              ? topReactionEmojis.join("")
-                              : "🤍"}
-                          </span>
+                          {totalReactions === 0 ? "🤍" : "+"}
                         </button>
-
-                        {totalReactions > 0 && (
-                          <button
-                            onClick={() => {
-                              setReactionsListFilter("all");
-                              setReactionsListPostId(post.id);
-                            }}
-                            className="hover:underline cursor-pointer"
-                            title="Показать, кто отреагировал"
-                          >
-                            {totalReactions}
-                          </button>
-                        )}
 
                         {openReactionPickerId === post.id && (
                           <>
