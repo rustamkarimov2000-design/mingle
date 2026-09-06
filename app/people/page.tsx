@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/lib/supabase/client";
+import ReportBlockMenu from "@/components/ReportBlockMenu";
+import { fetchBlockedUserIds } from "@/lib/blocking";
 
 interface Person {
   id: string;
@@ -67,6 +69,8 @@ export default function PeoplePage() {
 
       setCurrentUserId(user.id);
 
+      const blockedIds = await fetchBlockedUserIds(supabase, user.id);
+
       // select("*") — берём все поля профиля, чтобы не сломать запрос,
       // если в таблице ещё нет колонок gender/interests
       const { data: profilesData, error: profilesError } = await supabase
@@ -80,18 +84,20 @@ export default function PeoplePage() {
         return;
       }
 
-      const normalized: Person[] = (profilesData || []).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        age: p.age,
-        city: p.city,
-        gender: p.gender || undefined,
-        interests: Array.isArray(p.interests) ? p.interests.filter(Boolean) : [],
-        bio: p.bio,
-        avatar_url: p.avatar_url,
-        avatar: p.avatar,
-        last_seen: p.last_seen,
-      }));
+      const normalized: Person[] = (profilesData || [])
+        .filter((p: any) => !blockedIds.has(p.id))
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          age: p.age,
+          city: p.city,
+          gender: p.gender || undefined,
+          interests: Array.isArray(p.interests) ? p.interests.filter(Boolean) : [],
+          bio: p.bio,
+          avatar_url: p.avatar_url,
+          avatar: p.avatar,
+          last_seen: p.last_seen,
+        }));
 
       setPeople(normalized);
 
@@ -369,8 +375,17 @@ export default function PeoplePage() {
                   return (
                     <div
                       key={person.id}
-                      className="flex flex-col justify-between rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md"
+                      className="relative flex flex-col justify-between rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md"
                     >
+                      <ReportBlockMenu
+                        targetUserId={person.id}
+                        targetName={person.name}
+                        className="absolute top-3 right-3"
+                        onBlocked={() =>
+                          setPeople((prev) => prev.filter((p) => p.id !== person.id))
+                        }
+                      />
+
                       <div>
                         <div className="flex items-center gap-4 mb-4">
                           <div className="relative">

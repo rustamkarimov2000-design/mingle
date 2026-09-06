@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AIAssistantModal from "@/components/AIAssistantModal";
+import ReportBlockMenu from "@/components/ReportBlockMenu";
+import { fetchBlockedUserIds } from "@/lib/blocking";
 
 interface Comment {
   id: string;
@@ -549,8 +551,17 @@ export default function HomePage() {
         return;
       }
 
-      const userIds = Array.from(new Set(postsData.map((p) => p.user_id)));
-      const postIds = postsData.map((p) => p.id);
+      const blockedIds = userId ? await fetchBlockedUserIds(supabase, userId) : new Set<string>();
+      const visiblePostsData = postsData.filter((p) => !blockedIds.has(p.user_id));
+
+      if (visiblePostsData.length === 0) {
+        setPosts([]);
+        setIsLoadingPosts(false);
+        return;
+      }
+
+      const userIds = Array.from(new Set(visiblePostsData.map((p) => p.user_id)));
+      const postIds = visiblePostsData.map((p) => p.id);
 
       const [profilesRes, likesRes, commentsRes] = await Promise.all([
         supabase.from("profiles").select("id, name").in("id", userIds),
@@ -602,7 +613,7 @@ export default function HomePage() {
 
       setCommentsByPost(commentsMap);
 
-      const formattedPosts: Post[] = postsData.map((post) => ({
+      const formattedPosts: Post[] = visiblePostsData.map((post) => ({
         ...post,
         profiles: {
           name: profilesMap.get(post.user_id) || "Пользователь",
@@ -621,7 +632,7 @@ export default function HomePage() {
     } finally {
       setIsLoadingPosts(false);
     }
-  }, [feedCategory]);
+  }, [feedCategory, userId]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -1600,7 +1611,7 @@ export default function HomePage() {
                           {post.category}
                         </span>
 
-                        {isOwnPost && (
+                        {isOwnPost ? (
                           <button
                             onClick={() => handleDeletePost(post.id)}
                             title="Удалить пост"
@@ -1608,6 +1619,14 @@ export default function HomePage() {
                           >
                             🗑️
                           </button>
+                        ) : (
+                          <ReportBlockMenu
+                            targetUserId={post.user_id}
+                            targetName={post.profiles?.name}
+                            onBlocked={() =>
+                              setPosts((prev) => prev.filter((p) => p.user_id !== post.user_id))
+                            }
+                          />
                         )}
                       </div>
                     </div>

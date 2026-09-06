@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import ReportBlockMenu from "@/components/ReportBlockMenu";
+import { fetchBlockedUserIds } from "@/lib/blocking";
 
 interface LikerProfile {
   id: string;
@@ -81,6 +83,7 @@ export default function LikesPage() {
       }
 
       const fromIds = likesData.map((l) => l.from_user_id);
+      const blockedIds = await fetchBlockedUserIds(supabase, user.id);
 
       const { data: profilesData, error: profilesError } = await supabase
         .from("profiles")
@@ -94,6 +97,7 @@ export default function LikesPage() {
       }
 
       const merged = likesData
+        .filter((like) => !blockedIds.has(like.from_user_id))
         .map((like) => {
           const profile = profilesData?.find((p) => p.id === like.from_user_id);
           if (!profile) return null;
@@ -283,8 +287,17 @@ export default function LikesPage() {
               return (
                 <div
                   key={liker.id}
-                  className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col"
+                  className="relative bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col"
                 >
+                  <ReportBlockMenu
+                    targetUserId={liker.id}
+                    targetName={liker.name}
+                    className="absolute top-2 left-2 z-10 [&>button]:bg-black/50 [&>button]:text-white [&>button]:hover:bg-black/70"
+                    onBlocked={() =>
+                      setLikers((prev) => prev.filter((l) => l.id !== liker.id))
+                    }
+                  />
+
                   <button
                     type="button"
                     onClick={() => setSelectedLiker(liker)}

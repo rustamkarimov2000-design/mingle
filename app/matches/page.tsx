@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/lib/supabase/client";
+import ReportBlockMenu from "@/components/ReportBlockMenu";
+import { fetchBlockedUserIds } from "@/lib/blocking";
 
 interface MatchProfile {
   matchId: string;
@@ -71,6 +73,8 @@ export default function MatchesPage() {
         m.user1_id === user.id ? m.user2_id : m.user1_id
       );
 
+      const blockedIds = await fetchBlockedUserIds(supabase, user.id);
+
       // select("*") — берём все поля профиля, чтобы не сломать запрос,
       // если в таблице ещё нет колонок gender/interests
       const { data: profilesData, error: profilesError } = await supabase
@@ -87,6 +91,8 @@ export default function MatchesPage() {
       const merged = matchesData
         .map((m) => {
           const otherId = m.user1_id === user.id ? m.user2_id : m.user1_id;
+          if (blockedIds.has(otherId)) return null;
+
           const profile = profilesData?.find((p: any) => p.id === otherId);
           if (!profile) return null;
 
@@ -337,6 +343,15 @@ export default function MatchesPage() {
                           src={photo}
                           alt={match.name}
                           className="w-full h-full object-cover"
+                        />
+
+                        <ReportBlockMenu
+                          targetUserId={match.userId}
+                          targetName={match.name}
+                          className="absolute top-2 right-2 [&>button]:bg-white/80 [&>button]:backdrop-blur-sm"
+                          onBlocked={() =>
+                            setMatches((prev) => prev.filter((m) => m.matchId !== match.matchId))
+                          }
                         />
                       </div>
 
