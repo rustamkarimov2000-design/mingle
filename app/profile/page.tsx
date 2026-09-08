@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ProfilePrompt } from "@/lib/prompts";
 
 interface Profile {
   id: string;
@@ -25,6 +26,7 @@ interface Profile {
   languages?: string[]; // Языки
   alcohol?: string; // Алкоголь
   smoking?: string; // Курение
+  prompts?: ProfilePrompt[]; // Prompts в стиле Hinge
 }
 
 export default function ProfilePage() {
@@ -214,6 +216,24 @@ export default function ProfilePage() {
               {profile?.bio || "Описание пока не заполнено."}
             </p>
           </div>
+
+          {profile?.prompts && profile.prompts.length > 0 && (
+            <div className="space-y-3">
+              {profile.prompts.map((prompt, idx) => (
+                <div
+                  key={idx}
+                  className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-2xl p-4 border border-pink-100"
+                >
+                  <p className="text-[10px] font-bold text-pink-500 uppercase tracking-wide mb-1.5">
+                    {prompt.question}
+                  </p>
+                  <p className="text-sm text-gray-800 font-semibold leading-relaxed">
+                    {prompt.answer}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
 
           {profile?.interests && profile.interests.length > 0 && (
             <div>

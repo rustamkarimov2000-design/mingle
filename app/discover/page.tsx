@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { ProfilePrompt } from "@/lib/prompts";
 import Link from "next/link";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
@@ -30,6 +31,7 @@ interface Candidate {
   avatar: string;
   photos: string[];
   interests: string[];
+  prompts: ProfilePrompt[];
   distanceKm: number | null;
 }
 
@@ -133,6 +135,10 @@ export default function DiscoverPage() {
           ? profile.interests.filter(Boolean)
           : [];
 
+        const prompts: ProfilePrompt[] = Array.isArray(profile.prompts)
+          ? profile.prompts.filter((p: any) => p?.question && p?.answer)
+          : [];
+
         return {
           id: profile.id,
           name: profile.name || "Без имени",
@@ -143,6 +149,7 @@ export default function DiscoverPage() {
           avatar: mainPhoto,
           photos: uniquePhotos,
           interests,
+          prompts,
           distanceKm,
         };
       }) || [];
@@ -539,6 +546,17 @@ export default function DiscoverPage() {
                           #{tag}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {currentCandidate.prompts.length > 0 && (
+                    <div className="bg-white/15 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/20">
+                      <p className="text-[10px] font-bold text-pink-200 uppercase tracking-wide mb-1">
+                        {currentCandidate.prompts[0].question}
+                      </p>
+                      <p className="text-sm font-semibold leading-snug">
+                        {currentCandidate.prompts[0].answer}
+                      </p>
                     </div>
                   )}
 

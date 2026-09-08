@@ -3,6 +3,7 @@
 import { useState, useEffect, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { PROMPT_QUESTIONS, ProfilePrompt } from "@/lib/prompts";
 
 interface Photo {
   id: string;
@@ -95,6 +96,12 @@ export default function EditProfilePage() {
     interestsText: "",
   });
 
+  const [prompts, setPrompts] = useState<ProfilePrompt[]>([
+    { question: "", answer: "" },
+    { question: "", answer: "" },
+    { question: "", answer: "" },
+  ]);
+
   const [photos, setPhotos] = useState<Photo[]>([]);
 
   useEffect(() => {
@@ -139,6 +146,12 @@ export default function EditProfilePage() {
           smoking: data.smoking || "",
           interestsText: Array.isArray(data.interests) ? data.interests.join(", ") : "",
         });
+
+        const savedPrompts: ProfilePrompt[] = Array.isArray(data.prompts) ? data.prompts : [];
+        const paddedPrompts: ProfilePrompt[] = [0, 1, 2].map(
+          (i) => savedPrompts[i] || { question: "", answer: "" }
+        );
+        setPrompts(paddedPrompts);
 
         if (data.latitude != null && data.longitude != null) {
           setLocationStatus("done");
@@ -343,6 +356,11 @@ export default function EditProfilePage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    // Сохраняем только полностью заполненные prompts (и вопрос, и ответ)
+    const filledPrompts = prompts.filter(
+      (p) => p.question.trim() && p.answer.trim()
+    );
+
     const updates = {
       id: profile.id,
       name: profile.name,
@@ -365,6 +383,7 @@ export default function EditProfilePage() {
       alcohol: profile.alcohol || null,
       smoking: profile.smoking || null,
       interests: interestsArray,
+      prompts: filledPrompts,
     };
 
     const { error } = await supabase
@@ -833,6 +852,64 @@ export default function EditProfilePage() {
               ))}
             </select>
           </div>
+        </div>
+
+        <div className="pt-2 border-t border-gray-100 space-y-4">
+          <div>
+            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+              Prompts
+            </h3>
+            <p className="text-[10px] text-gray-400 mt-1">
+              Выберите до 3 вопросов и коротко ответьте — это увидят вместо голого "О себе" и
+              людям будет проще написать вам первыми.
+            </p>
+          </div>
+
+          {prompts.map((prompt, idx) => {
+            const usedElsewhere = prompts
+              .filter((_, i) => i !== idx)
+              .map((p) => p.question);
+
+            return (
+              <div key={idx} className="bg-gray-50 rounded-2xl p-4 space-y-2 border border-gray-100">
+                <label className="block text-xs font-bold text-gray-600 mb-1">
+                  Вопрос {idx + 1}
+                </label>
+
+                <select
+                  value={prompt.question}
+                  onChange={(e) => {
+                    const next = [...prompts];
+                    next[idx] = { ...next[idx], question: e.target.value };
+                    setPrompts(next);
+                  }}
+                  className={selectClass}
+                >
+                  <option value="">Не выбрано</option>
+                  {PROMPT_QUESTIONS.filter((q) => !usedElsewhere.includes(q)).map((q) => (
+                    <option key={q} value={q}>
+                      {q}
+                    </option>
+                  ))}
+                </select>
+
+                {prompt.question && (
+                  <textarea
+                    value={prompt.answer}
+                    onChange={(e) => {
+                      const next = [...prompts];
+                      next[idx] = { ...next[idx], answer: e.target.value };
+                      setPrompts(next);
+                    }}
+                    placeholder="Ваш ответ..."
+                    rows={2}
+                    maxLength={150}
+                    className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-pink-500 transition resize-none"
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <button
