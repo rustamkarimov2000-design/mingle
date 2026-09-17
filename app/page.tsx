@@ -1331,6 +1331,13 @@ export default function HomePage() {
             </Link>
 
             <Link
+              href="/events"
+              className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+            >
+              🎉 События
+            </Link>
+
+            <Link
               href="/likes"
               className="flex items-center justify-between px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
             >
