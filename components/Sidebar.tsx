@@ -11,6 +11,7 @@ export default function Sidebar() {
     { label: "Мэтчи", href: "/matches", icon: "🔥" },
     { label: "Лайки", href: "/likes", icon: "💌" },
     { label: "Люди", href: "/people", icon: "👥" },
+    { label: "События", href: "/events", icon: "🎉" },
     { label: "Сообщения", href: "/messages", icon: "💬" },
     { label: "Мой профиль", href: "/profile", icon: "👤" },
   ];
