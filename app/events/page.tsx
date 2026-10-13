@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Header from "@/components/Header";
+import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/lib/supabase/client";
 import { fetchBlockedUserIds } from "@/lib/blocking";
 
@@ -237,6 +240,44 @@ export default function EventsPage() {
     setBusyEventId(null);
   };
 
+  const handleDeleteEvent = async (event: EventItem) => {
+    if (!userId || event.creator_id !== userId) return;
+
+    if (
+      !confirm(
+        "Удалить событие «" +
+          event.title +
+          "»? Все участники потеряют запись, отменить это нельзя."
+      )
+    ) {
+      return;
+    }
+
+    setBusyEventId(event.id);
+
+    const { data, error } = await supabase
+      .from("events")
+      .delete()
+      .eq("id", event.id)
+      .select();
+
+    setBusyEventId(null);
+
+    if (error) {
+      console.error("Ошибка удаления события:", error);
+      alert("Не удалось удалить событие: " + error.message);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      alert("Событие не удалено — вероятно, нет DELETE-политики (RLS).");
+      return;
+    }
+
+    setEvents((prev) => prev.filter((e) => e.id !== event.id));
+    setDetailEventId(null);
+  };
+
   const handleCreateEvent = async () => {
     if (!userId || !form.title.trim() || !form.city.trim() || !form.date || !form.time) {
       alert("Заполните название, город, дату и время");
@@ -300,21 +341,35 @@ export default function EventsPage() {
   const detailEvent = detailEventId ? events.find((e) => e.id === detailEventId) : null;
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-gray-800 pb-12">
-      <header className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-        <span className="text-sm font-black tracking-wider text-gray-900">
-          🎉 СОБЫТИЯ РЯДОМ
-        </span>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <Header />
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-[#E02868] hover:bg-pink-700 text-white text-xs font-bold px-4 py-2 rounded-full transition cursor-pointer"
-        >
-          + Создать
-        </button>
-      </header>
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 py-6 sm:px-6">
+        <div className="grid flex-1 grid-cols-1 items-start gap-6 lg:grid-cols-12">
+          <aside className="hidden lg:sticky lg:top-20 lg:block lg:col-span-3">
+            <Sidebar />
+          </aside>
 
-      <main className="max-w-5xl mx-auto px-6 pt-2 space-y-4">
+          <section className="col-span-1 space-y-4 lg:col-span-9">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="text-xs font-bold text-gray-500 hover:text-gray-900 transition"
+            >
+              ← На главную
+            </Link>
+            <h1 className="text-sm font-black tracking-wider">🎉 События рядом</h1>
+          </div>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-[#E02868] hover:bg-pink-700 text-white text-xs font-bold px-4 py-2 rounded-full transition cursor-pointer"
+          >
+            + Создать
+          </button>
+        </div>
+
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {cityOptions.map((city) => (
             <button
@@ -366,9 +421,22 @@ export default function EventsPage() {
                     </div>
 
                     {isOwn && (
-                      <span className="bg-pink-50 text-pink-600 text-[9px] font-bold px-2 py-1 rounded-full shrink-0">
-                        Ваше
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="bg-pink-50 text-pink-600 text-[9px] font-bold px-2 py-1 rounded-full">
+                          Ваше
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteEvent(event);
+                          }}
+                          disabled={isBusy}
+                          title="Удалить событие"
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-sm hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -421,6 +489,8 @@ export default function EventsPage() {
             })}
           </div>
         )}
+          </section>
+        </div>
       </main>
 
       {/* ДЕТАЛИ СОБЫТИЯ */}
@@ -512,6 +582,16 @@ export default function EventsPage() {
                   ? "Отменить участие"
                   : "Присоединиться"}
               </button>
+
+              {detailEvent.creator_id === userId && (
+                <button
+                  onClick={() => handleDeleteEvent(detailEvent)}
+                  disabled={busyEventId === detailEvent.id}
+                  className="w-full mt-2 text-xs font-bold py-3 rounded-2xl transition cursor-pointer disabled:opacity-50 bg-red-50 text-red-600 hover:bg-red-100"
+                >
+                  🗑️ Удалить событие
+                </button>
+              )}
             </div>
           </div>
         </div>
