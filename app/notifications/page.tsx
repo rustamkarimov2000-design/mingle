@@ -203,6 +203,8 @@ export default function NotificationsPage() {
         return "✉️";
       case "follow":
         return "👋";
+      case "event_join":
+        return "🎉";
       default:
         return "🔔";
     }
@@ -433,6 +435,18 @@ export default function NotificationsPage() {
                         className="bg-pink-50 hover:bg-pink-100 text-pink-600 text-[10px] font-bold px-3 py-2 rounded-xl transition"
                       >
                         Посмотреть
+                      </Link>
+                    )}
+
+                    {notification.type === "event_join" && (
+                      <Link
+                        href="/events"
+                        onClick={() =>
+                          markAsRead(notification.id)
+                        }
+                        className="bg-pink-50 hover:bg-pink-100 text-pink-600 text-[10px] font-bold px-3 py-2 rounded-xl transition"
+                      >
+                        События
                       </Link>
                     )}
 
