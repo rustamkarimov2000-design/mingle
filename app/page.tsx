@@ -86,6 +86,8 @@ export default function HomePage() {
   const [notificationsCount, setNotificationsCount] = useState(0);
 
   const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
+  // commentId -> список id пользователей, поставивших лайк комментарию
+  const [commentLikes, setCommentLikes] = useState<Record<string, string[]>>({});
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [submittingComment, setSubmittingComment] = useState<Set<string>>(new Set());
@@ -565,14 +567,14 @@ export default function HomePage() {
       const lastCursor = rawCount > 0 ? rawPosts[rawCount - 1].created_at : cursor;
 
       if (rawCount === 0) {
-        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, rawCount, lastCursor };
+        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, commentLikes: {} as Record<string, string[]>, rawCount, lastCursor };
       }
 
       const blockedIds = userId ? await fetchBlockedUserIds(supabase, userId) : new Set<string>();
       const visiblePostsData = rawPosts.filter((p) => !blockedIds.has(p.user_id));
 
       if (visiblePostsData.length === 0) {
-        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, rawCount, lastCursor };
+        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, commentLikes: {} as Record<string, string[]>, rawCount, lastCursor };
       }
 
       const userIds = Array.from(new Set(visiblePostsData.map((p) => p.user_id)));
@@ -611,6 +613,17 @@ export default function HomePage() {
 
       const commenterMap = new Map((commenterProfiles || []).map((p) => [p.id, p.name]));
 
+      const commentIds = commentsData.map((c) => c.id);
+      const { data: commentLikesData } = commentIds.length
+        ? await supabase.from("comment_likes").select("comment_id, user_id").in("comment_id", commentIds)
+        : { data: [] as { comment_id: string; user_id: string }[] };
+
+      const commentLikesMap: Record<string, string[]> = {};
+      (commentLikesData || []).forEach((l) => {
+        if (!commentLikesMap[l.comment_id]) commentLikesMap[l.comment_id] = [];
+        commentLikesMap[l.comment_id].push(l.user_id);
+      });
+
       const commentsMap: Record<string, Comment[]> = {};
 
       commentsData.forEach((c) => {
@@ -639,7 +652,7 @@ export default function HomePage() {
           })),
       }));
 
-      return { formatted, comments: commentsMap, rawCount, lastCursor };
+      return { formatted, comments: commentsMap, commentLikes: commentLikesMap, rawCount, lastCursor };
     },
     [feedCategory, userId]
   );
@@ -651,12 +664,13 @@ export default function HomePage() {
 
     try {
       const limit = Math.max(POSTS_PAGE_SIZE, loadedRawCountRef.current);
-      const { formatted, comments, rawCount, lastCursor } = await loadPostsBatch(limit, null);
+      const { formatted, comments, commentLikes: likesMap, rawCount, lastCursor } = await loadPostsBatch(limit, null);
 
       loadedRawCountRef.current = rawCount;
       postsCursorRef.current = lastCursor;
       setHasMorePosts(rawCount >= limit);
       setCommentsByPost(comments);
+      setCommentLikes(likesMap);
       setPosts(formatted);
     } catch (err) {
       console.error("Ошибка загрузки постов:", err);
@@ -671,7 +685,7 @@ export default function HomePage() {
     setIsLoadingMorePosts(true);
 
     try {
-      const { formatted, comments, rawCount, lastCursor } = await loadPostsBatch(
+      const { formatted, comments, commentLikes: likesMap, rawCount, lastCursor } = await loadPostsBatch(
         POSTS_PAGE_SIZE,
         postsCursorRef.current
       );
@@ -680,6 +694,7 @@ export default function HomePage() {
       postsCursorRef.current = lastCursor;
       setHasMorePosts(rawCount >= POSTS_PAGE_SIZE);
       setCommentsByPost((prev) => ({ ...prev, ...comments }));
+      setCommentLikes((prev) => ({ ...prev, ...likesMap }));
       setPosts((prev) => {
         const known = new Set(prev.map((p) => p.id));
         return [...prev, ...formatted.filter((p) => !known.has(p.id))];
@@ -1123,6 +1138,47 @@ export default function HomePage() {
   const cancelReply = (commentId: string) => {
     setReplyingTo((prev) => ({ ...prev, [commentId]: null }));
     setReplyDrafts((prev) => ({ ...prev, [commentId]: "" }));
+  };
+
+  const handleToggleCommentLike = async (commentId: string) => {
+    if (!userId) return;
+
+    const current = commentLikes[commentId] || [];
+    const alreadyLiked = current.includes(userId);
+
+    // Сразу обновляем интерфейс
+    setCommentLikes((prev) => ({
+      ...prev,
+      [commentId]: alreadyLiked
+        ? current.filter((id) => id !== userId)
+        : [...current, userId],
+    }));
+
+    const revert = () =>
+      setCommentLikes((prev) => ({ ...prev, [commentId]: current }));
+
+    if (alreadyLiked) {
+      const { error } = await supabase
+        .from("comment_likes")
+        .delete()
+        .eq("comment_id", commentId)
+        .eq("user_id", userId);
+
+      if (error) {
+        console.error("Ошибка снятия лайка с комментария:", error);
+        revert();
+      }
+    } else {
+      const { error } = await supabase
+        .from("comment_likes")
+        .insert({ comment_id: commentId, user_id: userId });
+
+      if (error) {
+        console.error("Ошибка лайка комментария:", error);
+        alert("Не удалось поставить лайк: " + error.message);
+        revert();
+      }
+    }
   };
 
   const handleReplyDraftChange = (commentId: string, value: string) => {
@@ -1845,14 +1901,31 @@ export default function HomePage() {
                                         )}
                                       </div>
 
-                                      <button
-                                        onClick={() =>
-                                          isReplying ? cancelReply(comment.id) : startReply(comment.id)
-                                        }
-                                        className="text-[10px] text-gray-400 hover:text-pink-500 font-bold mt-1 ml-1 cursor-pointer"
-                                      >
-                                        {isReplying ? "Отменить" : "Ответить"}
-                                      </button>
+                                      <div className="flex items-center gap-3 mt-1 ml-1">
+                                        <button
+                                          onClick={() =>
+                                            isReplying ? cancelReply(comment.id) : startReply(comment.id)
+                                          }
+                                          className="text-[10px] text-gray-400 hover:text-pink-500 font-bold cursor-pointer"
+                                        >
+                                          {isReplying ? "Отменить" : "Ответить"}
+                                        </button>
+
+                                        <button
+                                          onClick={() => handleToggleCommentLike(comment.id)}
+                                          className={
+                                            "text-[10px] font-bold cursor-pointer flex items-center gap-1 transition " +
+                                            (userId && (commentLikes[comment.id] || []).includes(userId)
+                                              ? "text-pink-500"
+                                              : "text-gray-400 hover:text-pink-500")
+                                          }
+                                        >
+                                          {userId && (commentLikes[comment.id] || []).includes(userId) ? "❤️" : "🤍"}
+                                          {(commentLikes[comment.id] || []).length > 0 && (
+                                            <span>{(commentLikes[comment.id] || []).length}</span>
+                                          )}
+                                        </button>
+                                      </div>
 
                                       {replies.length > 0 && (
                                         <div className="mt-2 ml-2 pl-3 border-l-2 border-gray-100 space-y-2">
@@ -1879,6 +1952,21 @@ export default function HomePage() {
                                                 <p className="text-[10px] text-gray-700 mt-0.5 whitespace-pre-wrap">
                                                   {reply.content}
                                                 </p>
+
+                                                <button
+                                                  onClick={() => handleToggleCommentLike(reply.id)}
+                                                  className={
+                                                    "text-[10px] font-bold cursor-pointer flex items-center gap-1 mt-0.5 transition " +
+                                                    (userId && (commentLikes[reply.id] || []).includes(userId)
+                                                      ? "text-pink-500"
+                                                      : "text-gray-400 hover:text-pink-500")
+                                                  }
+                                                >
+                                                  {userId && (commentLikes[reply.id] || []).includes(userId) ? "❤️" : "🤍"}
+                                                  {(commentLikes[reply.id] || []).length > 0 && (
+                                                    <span>{(commentLikes[reply.id] || []).length}</span>
+                                                  )}
+                                                </button>
                                               </div>
                                             </div>
                                           ))}
