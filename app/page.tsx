@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import AIAssistantModal from "@/components/AIAssistantModal";
 import ReportBlockMenu from "@/components/ReportBlockMenu";
 import { fetchBlockedUserIds } from "@/lib/blocking";
+import { compressImage } from "@/lib/compressImage";
 
 interface Comment {
   id: string;
@@ -71,6 +72,11 @@ export default function HomePage() {
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  // Сколько "сырых" постов (до фильтра блокировок) уже загружено и курсор для следующей порции
+  const loadedRawCountRef = useRef(0);
+  const postsCursorRef = useRef<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [unreadCount, setUnreadCount] = useState(0);
@@ -397,10 +403,13 @@ export default function HomePage() {
     try {
       setIsUploadingStory(true);
 
-      const fileExt = file.name.split(".").pop();
+      const fileToUpload = isVideo ? file : await compressImage(file);
+      const fileExt = fileToUpload.name.split(".").pop();
       const filePath = userId + "/" + Date.now() + "." + fileExt;
 
-      const { error: uploadError } = await supabase.storage.from("stories").upload(filePath, file);
+      const { error: uploadError } = await supabase.storage
+        .from("stories")
+        .upload(filePath, fileToUpload);
 
       if (uploadError) throw uploadError;
 
@@ -527,37 +536,43 @@ export default function HomePage() {
   // POSTS
   // =========================================================
 
-  const fetchPosts = useCallback(async () => {
-    setIsLoadingPosts(true);
+  const POSTS_PAGE_SIZE = 10;
 
-    try {
-      let query = supabase.from("posts").select("*").order("created_at", { ascending: false });
+  // Загружает посты и все данные к ним (авторы, реакции, комментарии).
+  // limit — сколько постов взять, cursor — взять только посты старше этой даты.
+  const loadPostsBatch = useCallback(
+    async (limit: number, cursor: string | null) => {
+      let query = supabase
+        .from("posts")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(limit);
 
       if (feedCategory !== "Все") {
         query = query.eq("category", feedCategory);
       }
 
-      const { data: postsData, error: postsError } = await query;
-
-      if (postsError) {
-        console.error("Ошибка загрузки постов:", postsError);
-        setIsLoadingPosts(false);
-        return;
+      if (cursor) {
+        query = query.lt("created_at", cursor);
       }
 
-      if (!postsData || postsData.length === 0) {
-        setPosts([]);
-        setIsLoadingPosts(false);
-        return;
+      const { data: postsData, error: postsError } = await query;
+
+      if (postsError) throw postsError;
+
+      const rawPosts = postsData || [];
+      const rawCount = rawPosts.length;
+      const lastCursor = rawCount > 0 ? rawPosts[rawCount - 1].created_at : cursor;
+
+      if (rawCount === 0) {
+        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, rawCount, lastCursor };
       }
 
       const blockedIds = userId ? await fetchBlockedUserIds(supabase, userId) : new Set<string>();
-      const visiblePostsData = postsData.filter((p) => !blockedIds.has(p.user_id));
+      const visiblePostsData = rawPosts.filter((p) => !blockedIds.has(p.user_id));
 
       if (visiblePostsData.length === 0) {
-        setPosts([]);
-        setIsLoadingPosts(false);
-        return;
+        return { formatted: [] as Post[], comments: {} as Record<string, Comment[]>, rawCount, lastCursor };
       }
 
       const userIds = Array.from(new Set(visiblePostsData.map((p) => p.user_id)));
@@ -611,9 +626,7 @@ export default function HomePage() {
         commentsMap[c.post_id].push(enriched);
       });
 
-      setCommentsByPost(commentsMap);
-
-      const formattedPosts: Post[] = visiblePostsData.map((post) => ({
+      const formatted: Post[] = visiblePostsData.map((post) => ({
         ...post,
         profiles: {
           name: profilesMap.get(post.user_id) || "Пользователь",
@@ -626,13 +639,63 @@ export default function HomePage() {
           })),
       }));
 
-      setPosts(formattedPosts);
+      return { formatted, comments: commentsMap, rawCount, lastCursor };
+    },
+    [feedCategory, userId]
+  );
+
+  // Перезагружает ленту. Если уже подгружено несколько порций — сохраняет их количество,
+  // чтобы лайк или новый комментарий не "сбрасывали" ленту к первым постам.
+  const fetchPosts = useCallback(async () => {
+    setIsLoadingPosts(true);
+
+    try {
+      const limit = Math.max(POSTS_PAGE_SIZE, loadedRawCountRef.current);
+      const { formatted, comments, rawCount, lastCursor } = await loadPostsBatch(limit, null);
+
+      loadedRawCountRef.current = rawCount;
+      postsCursorRef.current = lastCursor;
+      setHasMorePosts(rawCount >= limit);
+      setCommentsByPost(comments);
+      setPosts(formatted);
     } catch (err) {
-      console.error("Системная ошибка при загрузке постов:", err);
+      console.error("Ошибка загрузки постов:", err);
     } finally {
       setIsLoadingPosts(false);
     }
-  }, [feedCategory, userId]);
+  }, [loadPostsBatch]);
+
+  const loadMorePosts = async () => {
+    if (isLoadingMorePosts || !hasMorePosts) return;
+
+    setIsLoadingMorePosts(true);
+
+    try {
+      const { formatted, comments, rawCount, lastCursor } = await loadPostsBatch(
+        POSTS_PAGE_SIZE,
+        postsCursorRef.current
+      );
+
+      loadedRawCountRef.current += rawCount;
+      postsCursorRef.current = lastCursor;
+      setHasMorePosts(rawCount >= POSTS_PAGE_SIZE);
+      setCommentsByPost((prev) => ({ ...prev, ...comments }));
+      setPosts((prev) => {
+        const known = new Set(prev.map((p) => p.id));
+        return [...prev, ...formatted.filter((p) => !known.has(p.id))];
+      });
+    } catch (err) {
+      console.error("Ошибка подгрузки постов:", err);
+    } finally {
+      setIsLoadingMorePosts(false);
+    }
+  };
+
+  useEffect(() => {
+    // при смене категории начинаем с первой порции
+    loadedRawCountRef.current = 0;
+    postsCursorRef.current = null;
+  }, [feedCategory]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -737,7 +800,8 @@ export default function HomePage() {
   // UPLOAD IMAGE
   // =========================================================
 
-  const uploadImageToBucket = async (bucket: string, file: File, folder: string) => {
+  const uploadImageToBucket = async (bucket: string, originalFile: File, folder: string) => {
+    const file = await compressImage(originalFile);
     const fileExt = file.name.split(".").pop();
 
     const filePath =
@@ -1916,6 +1980,16 @@ export default function HomePage() {
                   </div>
                 );
               })
+            )}
+
+            {!isLoadingPosts && hasMorePosts && posts.length > 0 && (
+              <button
+                onClick={loadMorePosts}
+                disabled={isLoadingMorePosts}
+                className="w-full bg-white hover:bg-gray-50 disabled:opacity-60 border border-gray-100 text-gray-600 text-xs font-bold py-3 rounded-2xl transition cursor-pointer"
+              >
+                {isLoadingMorePosts ? "Загрузка..." : "Показать ещё"}
+              </button>
             )}
           </div>
         </section>
