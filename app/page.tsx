@@ -68,6 +68,7 @@ export default function HomePage() {
 
   const [displayName, setDisplayName] = useState("Гость");
   const [userId, setUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [posts, setPosts] = useState<Post[]>([]);
@@ -146,10 +147,11 @@ export default function HomePage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name")
+        .select("name, is_admin")
         .eq("id", authUser.id)
         .single();
 
+      setIsAdmin(!!profile?.is_admin);
       setDisplayName(profile?.name || authUser.email?.split("@")[0] || "Пользователь");
 
       setIsLoaded(true);
@@ -1456,6 +1458,15 @@ export default function HomePage() {
             >
               🎉 События
             </Link>
+
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="flex items-center gap-3.5 px-5 py-3.5 rounded-2xl hover:bg-gray-50 font-bold text-sm text-gray-600 transition"
+              >
+                🛡️ Админка
+              </Link>
+            )}
 
             <Link
               href="/likes"

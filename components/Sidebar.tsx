@@ -2,9 +2,34 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    const checkAdmin = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("is_admin")
+        .eq("id", user.id)
+        .single();
+
+      setIsAdmin(!!data?.is_admin);
+    };
+
+    checkAdmin();
+  }, []);
 
   const navItems = [
     { label: "Главная", href: "/", icon: "🏠" },
@@ -14,6 +39,7 @@ export default function Sidebar() {
     { label: "События", href: "/events", icon: "🎉" },
     { label: "Сообщения", href: "/messages", icon: "💬" },
     { label: "Мой профиль", href: "/profile", icon: "👤" },
+    ...(isAdmin ? [{ label: "Админка", href: "/admin", icon: "🛡️" }] : []),
   ];
 
   return (
