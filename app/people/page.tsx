@@ -28,6 +28,9 @@ type RelationStatus = "none" | "liked" | "matched";
 const DEFAULT_MIN_AGE = 18;
 const DEFAULT_MAX_AGE = 99;
 
+const PEOPLE_LIMIT = 500;
+const PEOPLE_PAGE_SIZE = 24;
+
 export default function PeoplePage() {
   const router = useRouter();
   const supabase = createClient();
@@ -37,6 +40,8 @@ export default function PeoplePage() {
   const [relations, setRelations] = useState<Record<string, RelationStatus>>({});
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  // Сколько анкет показано сейчас; остальные подгружаются кнопкой «Показать ещё»
+  const [visibleCount, setVisibleCount] = useState(PEOPLE_PAGE_SIZE);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [selectedCity, setSelectedCity] = useState("Все");
@@ -73,12 +78,16 @@ export default function PeoplePage() {
 
       const blockedIds = await fetchBlockedUserIds(supabase, user.id);
 
-      // select("*") — берём все поля профиля, чтобы не сломать запрос,
-      // если в таблице ещё нет колонок gender/interests
+      // Берём только нужные поля и не больше PEOPLE_LIMIT анкет —
+      // сначала самые недавно активные
       const { data: profilesData, error: profilesError } = await supabase
         .from("profiles")
-        .select("*")
-        .neq("id", user.id);
+        .select(
+          "id, name, is_verified, age, city, gender, interests, bio, avatar_url, avatar, last_seen"
+        )
+        .neq("id", user.id)
+        .order("last_seen", { ascending: false, nullsFirst: false })
+        .limit(PEOPLE_LIMIT);
 
       if (profilesError) {
         console.error("Ошибка загрузки людей:", profilesError);
@@ -202,6 +211,11 @@ export default function PeoplePage() {
     setMinAge(DEFAULT_MIN_AGE);
     setMaxAge(DEFAULT_MAX_AGE);
   };
+
+  // При смене фильтров или поиска возвращаемся к первой порции
+  useEffect(() => {
+    setVisibleCount(PEOPLE_PAGE_SIZE);
+  }, [search, selectedCity, selectedGender, selectedInterest, minAge, maxAge]);
 
   const filteredPeople = people.filter((person) => {
     const searchMatch =
@@ -370,7 +384,7 @@ export default function PeoplePage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                {filteredPeople.map((person) => {
+                {filteredPeople.slice(0, visibleCount).map((person) => {
                   const status = relations[person.id] || "none";
                   const online = isOnline(person.last_seen);
                   const isBusy = busyId === person.id;
@@ -460,6 +474,15 @@ export default function PeoplePage() {
                   );
                 })}
               </div>
+            )}
+
+            {!isLoading && filteredPeople.length > visibleCount && (
+              <button
+                onClick={() => setVisibleCount((prev) => prev + PEOPLE_PAGE_SIZE)}
+                className="w-full rounded-2xl border bg-white py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50 cursor-pointer"
+              >
+                Показать ещё ({filteredPeople.length - visibleCount})
+              </button>
             )}
           </section>
         </div>

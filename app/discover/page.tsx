@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { fetchBlockedUserIds } from "@/lib/blocking";
 import VerifiedBadge from "@/components/VerifiedBadge";
 import { ProfilePrompt } from "@/lib/prompts";
 import Link from "next/link";
@@ -37,6 +38,7 @@ interface Candidate {
   distanceKm: number | null;
 }
 
+const CANDIDATES_PAGE_SIZE = 60;
 const DEFAULT_MIN_AGE = 18;
 const DEFAULT_MAX_AGE = 99;
 
@@ -62,6 +64,19 @@ export default function DiscoverPage() {
     loadCandidates();
   }, []);
 
+  // Анкеты подгружаются порциями по CANDIDATES_PAGE_SIZE, а не все сразу
+  const sessionRef = useRef<{
+    userId: string;
+    likedIds: Set<string>;
+    blockedIds: Set<string>;
+    myLat: number | null;
+    myLon: number | null;
+  } | null>(null);
+  const nextOffsetRef = useRef(0);
+  const isFetchingRef = useRef(false);
+  const [hasMoreCandidates, setHasMoreCandidates] = useState(false);
+  const [pagesLoaded, setPagesLoaded] = useState(0);
+
   async function loadCandidates() {
     const supabase = createClient();
 
@@ -84,41 +99,73 @@ export default function DiscoverPage() {
       setMyAvatar(myProfile.avatar);
     }
 
-    const myLat = myProfile?.latitude;
-    const myLon = myProfile?.longitude;
+    // Кого мы уже лайкнули и кого нельзя показывать (блокировки, баны)
+    const [{ data: alreadyLiked }, blockedIds] = await Promise.all([
+      supabase.from("likes").select("to_user_id").eq("from_user_id", user.id),
+      fetchBlockedUserIds(supabase, user.id),
+    ]);
 
-    // Загружаем ID всех, кого мы уже лайкнули
-    const { data: alreadyLiked } = await supabase
-      .from("likes")
-      .select("to_user_id")
-      .eq("from_user_id", user.id);
+    sessionRef.current = {
+      userId: user.id,
+      likedIds: new Set((alreadyLiked || []).map((l) => l.to_user_id)),
+      blockedIds,
+      myLat: myProfile?.latitude ?? null,
+      myLon: myProfile?.longitude ?? null,
+    };
+    nextOffsetRef.current = 0;
 
-    const likedIds = alreadyLiked?.map((l) => l.to_user_id) || [];
+    await loadMoreCandidates();
+    setIsLoading(false);
+  }
 
-    let query = supabase.from("profiles").select("*").neq("id", user.id);
+  async function loadMoreCandidates() {
+    const session = sessionRef.current;
 
-    if (likedIds.length > 0) {
-      query = query.not("id", "in", `(${likedIds.join(",")})`);
-    }
+    if (!session || isFetchingRef.current) return;
 
-    const { data, error } = await query;
+    isFetchingRef.current = true;
 
-    if (error) {
-      console.error("Ошибка загрузки анкет:", error);
-      setIsLoading(false);
-      return;
-    }
+    const supabase = createClient();
 
-    const candidateIds = data?.map((p) => p.id) || [];
+    try {
+      const from = nextOffsetRef.current;
 
-    const { data: allPhotos } = await supabase
-      .from("photos")
-      .select("profile_id, url")
-      .in("profile_id", candidateIds)
-      .order("position", { ascending: true });
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .neq("id", session.userId)
+        .order("last_seen", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: true })
+        .range(from, from + CANDIDATES_PAGE_SIZE - 1);
 
-    const people: Candidate[] =
-      data?.map((profile) => {
+      if (error) {
+        console.error("Ошибка загрузки анкет:", error);
+        setHasMoreCandidates(false);
+        return;
+      }
+
+      const rows = data || [];
+      nextOffsetRef.current = from + rows.length;
+      setHasMoreCandidates(rows.length === CANDIDATES_PAGE_SIZE);
+
+      const fresh = rows.filter(
+        (p) => !session.likedIds.has(p.id) && !session.blockedIds.has(p.id)
+      );
+
+      const candidateIds = fresh.map((p) => p.id);
+
+      const { data: allPhotos } = candidateIds.length
+        ? await supabase
+            .from("photos")
+            .select("profile_id, url")
+            .in("profile_id", candidateIds)
+            .order("position", { ascending: true })
+        : { data: [] as { profile_id: string; url: string }[] };
+
+      const myLat = session.myLat;
+      const myLon = session.myLon;
+
+      const people: Candidate[] = fresh.map((profile) => {
         const mainPhoto =
           profile.avatar ||
           "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600";
@@ -155,10 +202,19 @@ export default function DiscoverPage() {
           prompts,
           distanceKm,
         };
-      }) || [];
+      });
 
-    setCandidates(people);
-    setIsLoading(false);
+      setCandidates((prev) => {
+        const known = new Set(prev.map((c) => c.id));
+        return [...prev, ...people.filter((c) => !known.has(c.id))];
+      });
+    } catch (err) {
+      console.error("Системная ошибка при загрузке анкет:", err);
+      setHasMoreCandidates(false);
+    } finally {
+      isFetchingRef.current = false;
+      setPagesLoaded((n) => n + 1);
+    }
   }
 
   const x = useMotionValue(0);
@@ -200,6 +256,15 @@ export default function DiscoverPage() {
   });
 
   const currentCandidate = filteredCandidates[currentIndex];
+
+  // Когда в колоде остаётся мало анкет — подгружаем следующую порцию
+  useEffect(() => {
+    if (isLoading || !hasMoreCandidates) return;
+
+    if (filteredCandidates.length - currentIndex <= 5) {
+      loadMoreCandidates();
+    }
+  }, [isLoading, hasMoreCandidates, filteredCandidates.length, currentIndex, pagesLoaded]);
 
   useEffect(() => {
     setPhotoIndex(0);

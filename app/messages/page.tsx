@@ -103,7 +103,10 @@ export default function MessagesPage() {
 
     updateLastSeen();
 
-    const intervalId = setInterval(updateLastSeen, 30000);
+    // Раз в 2 минуты и только когда вкладка видна — так меньше записей в базу
+    const intervalId = setInterval(() => {
+      if (!document.hidden) updateLastSeen();
+    }, 120000);
 
     const handleBeforeUnload = () => {
       updateLastSeen();
@@ -231,7 +234,9 @@ export default function MessagesPage() {
       }
     };
 
-    const intervalId = setInterval(refreshSelectedProfile, 30000);
+    const intervalId = setInterval(() => {
+      if (!document.hidden) refreshSelectedProfile();
+    }, 60000);
 
     return () => clearInterval(intervalId);
   }, [selectedMatch?.matchId]);
