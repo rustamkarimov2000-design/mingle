@@ -26,6 +26,7 @@ interface Stats {
   matches: number;
   pendingReports: number;
   totalReports: number;
+  pendingVerifications: number;
 }
 
 type UserFilter = "all" | "banned";
@@ -80,7 +81,9 @@ export default function AdminPage() {
       matches,
       pendingReports,
       totalReports,
+      pendingVerifications,
     ] = await Promise.all([
+
       countOf("profiles"),
       countOf("profiles", (q) => q.eq("is_banned", true)),
       countOf("profiles", (q) => q.gte("last_seen", dayAgo)),
@@ -90,6 +93,7 @@ export default function AdminPage() {
       countOf("matches"),
       countOf("reports", (q) => q.eq("status", "pending")),
       countOf("reports"),
+      countOf("verification_requests", (q) => q.eq("status", "pending")),
     ]);
 
     setStats({
@@ -102,6 +106,7 @@ export default function AdminPage() {
       matches,
       pendingReports,
       totalReports,
+      pendingVerifications,
     });
   };
 
@@ -257,6 +262,13 @@ export default function AdminPage() {
           href: "/admin/reports",
           accent: stats.pendingReports > 0,
         },
+        {
+          label: "Проверка фото",
+          value: stats.pendingVerifications,
+          hint: "ожидают проверки",
+          href: "/admin/verifications",
+          accent: stats.pendingVerifications > 0,
+        },
       ]
     : [];
 
@@ -265,6 +277,9 @@ export default function AdminPage() {
       <header className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
         <span className="text-sm font-black tracking-wider text-gray-900">🛡️ АДМИНКА</span>
         <div className="flex items-center gap-4">
+          <Link href="/admin/verifications" className="text-xs font-bold text-pink-600 hover:text-pink-700">
+            Проверка фото →
+          </Link>
           <Link href="/admin/reports" className="text-xs font-bold text-pink-600 hover:text-pink-700">
             Жалобы →
           </Link>

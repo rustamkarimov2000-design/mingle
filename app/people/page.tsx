@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/lib/supabase/client";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import ReportBlockMenu from "@/components/ReportBlockMenu";
 import { fetchBlockedUserIds } from "@/lib/blocking";
 
 interface Person {
   id: string;
   name: string;
+  is_verified?: boolean;
   age?: number;
   city?: string;
   gender?: string;
@@ -89,6 +91,7 @@ export default function PeoplePage() {
         .map((p: any) => ({
           id: p.id,
           name: p.name,
+          is_verified: !!p.is_verified,
           age: p.age,
           city: p.city,
           gender: p.gender || undefined,
@@ -399,9 +402,12 @@ export default function PeoplePage() {
                             )}
                           </div>
                           <div>
-                            <h3 className="text-lg font-bold text-gray-900">
-                              {person.name}
-                              {person.age ? ", " + person.age : ""}
+                            <h3 className="text-lg font-bold text-gray-900 flex items-center gap-1.5">
+                              <span>
+                                {person.name}
+                                {person.age ? ", " + person.age : ""}
+                              </span>
+                              {person.is_verified && <VerifiedBadge />}
                             </h3>
                             {person.city && (
                               <p className="text-xs text-gray-500">{person.city}</p>

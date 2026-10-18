@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import { ProfilePrompt } from "@/lib/prompts";
 import Link from "next/link";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
@@ -24,6 +25,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 interface Candidate {
   id: string;
   name: string;
+  is_verified?: boolean;
   age: number;
   city: string;
   gender: string | null;
@@ -142,6 +144,7 @@ export default function DiscoverPage() {
         return {
           id: profile.id,
           name: profile.name || "Без имени",
+          is_verified: !!profile.is_verified,
           age: profile.age || 18,
           city: profile.city || "Не указан",
           gender: profile.gender || null,
@@ -523,8 +526,11 @@ export default function DiscoverPage() {
 
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-6 flex flex-col justify-end text-white space-y-3 pointer-events-none">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-2xl font-black">
-                      {currentCandidate.name}, {currentCandidate.age}
+                    <h3 className="text-2xl font-black flex items-center gap-2">
+                      <span>
+                        {currentCandidate.name}, {currentCandidate.age}
+                      </span>
+                      {currentCandidate.is_verified && <VerifiedBadge className="h-5 w-5 text-xs" />}
                     </h3>
                     <span className="bg-white/20 text-xs font-bold px-3 py-1 rounded-full backdrop-blur-md">
                       📍 {currentCandidate.city}

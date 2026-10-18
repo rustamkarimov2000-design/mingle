@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import IcebreakerButton from "@/components/IcebreakerButton";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 interface Profile {
   id: string;
@@ -12,6 +13,7 @@ interface Profile {
   avatar_url?: string;
   avatar?: string;
   last_seen?: string;
+  is_verified?: boolean;
 }
 
 interface MatchInfo {
@@ -499,7 +501,10 @@ export default function MessagesPage() {
               </div>
 
               <div>
-                <h4 className="text-sm font-bold text-gray-900">{selectedMatch.profile.name}</h4>
+                <h4 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                  {selectedMatch.profile.name}
+                  {selectedMatch.profile.is_verified && <VerifiedBadge />}
+                </h4>
                 <span
                   className={`text-xs font-medium ${
                     isSelectedUserOnline ? "text-green-500" : "text-gray-400"

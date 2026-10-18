@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { createClient } from "@/lib/supabase/client";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import ReportBlockMenu from "@/components/ReportBlockMenu";
 import { fetchBlockedUserIds } from "@/lib/blocking";
 
@@ -13,6 +14,7 @@ interface MatchProfile {
   matchId: string;
   userId: string;
   name: string;
+  is_verified?: boolean;
   age?: number;
   city?: string;
   gender?: string;
@@ -100,6 +102,7 @@ export default function MatchesPage() {
             matchId: m.id,
             userId: otherId,
             name: profile.name,
+            is_verified: !!profile.is_verified,
             age: profile.age,
             city: profile.city,
             gender: profile.gender || undefined,
@@ -357,8 +360,9 @@ export default function MatchesPage() {
 
                       <div className="p-4 space-y-1">
                         <div className="flex items-baseline gap-2">
-                          <h4 className="text-sm font-black text-gray-900">
+                          <h4 className="text-sm font-black text-gray-900 flex items-center gap-1">
                             {match.name}
+                            {match.is_verified && <VerifiedBadge />}
                           </h4>
                           {match.age && (
                             <span className="text-xs text-gray-500">
