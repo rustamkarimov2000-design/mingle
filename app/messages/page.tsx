@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import IcebreakerButton from "@/components/IcebreakerButton";
 
 interface Profile {
   id: string;
@@ -573,9 +574,21 @@ export default function MessagesPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            <div className="px-4 pt-3 bg-white border-t border-gray-100">
+              <IcebreakerButton
+                key={selectedMatch.profile.id}
+                targetUserId={selectedMatch.profile.id}
+                onPick={(text) => setNewMessage(text)}
+                recentMessages={messages.slice(-8).map((m) => ({
+                  mine: m.sender_id === currentUserId,
+                  text: m.content,
+                }))}
+              />
+            </div>
+
             <form
               onSubmit={handleSendMessage}
-              className="p-4 border-t border-gray-100 bg-white flex items-center gap-3"
+              className="p-4 pt-2 bg-white flex items-center gap-3"
             >
               <input
                 type="text"
