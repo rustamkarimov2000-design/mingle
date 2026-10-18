@@ -1,148 +1,163 @@
-import { NextRequest, NextResponse } from "next/server";
+"use client";
 
-interface ProfileInfo {
-  name?: string;
-  age?: number | null;
-  city?: string | null;
-  bio?: string | null;
-  occupation?: string | null;
-  dating_goal?: string | null;
-  interests?: string[] | null;
-  prompts?: { question: string; answer: string }[] | null;
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+interface IcebreakerButtonProps {
+  // id собеседника (мэтча)
+  targetUserId: string;
+  // Что делать с выбранным вариантом — обычно подставить в поле ввода
+  onPick: (text: string) => void;
+  // Последние сообщения переписки (необязательно). Если есть — ИИ предложит продолжение диалога.
+  recentMessages?: { mine: boolean; text: string }[];
+  className?: string;
 }
 
-interface ChatLine {
-  mine: boolean;
-  text: string;
-}
+const PROFILE_FIELDS =
+  "name, age, city, bio, occupation, dating_goal, interests, prompts";
 
-const clip = (v: unknown, max: number) =>
-  typeof v === "string" ? v.slice(0, max) : "";
+export default function IcebreakerButton({
+  targetUserId,
+  onPick,
+  recentMessages,
+  className,
+}: IcebreakerButtonProps) {
+  const supabase = createClient();
 
-function describe(p: ProfileInfo | undefined) {
-  if (!p) return "нет данных";
+  const [open, setOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
 
-  const parts: string[] = [];
-  if (p.name) parts.push("имя: " + clip(p.name, 60));
-  if (p.age) parts.push("возраст: " + Number(p.age));
-  if (p.city) parts.push("город: " + clip(p.city, 60));
-  if (p.occupation) parts.push("сфера работы: " + clip(p.occupation, 100));
-  if (p.dating_goal) parts.push("цель знакомства: " + clip(p.dating_goal, 100));
-  if (p.bio) parts.push("о себе: " + clip(p.bio, 500));
-  if (Array.isArray(p.interests) && p.interests.length)
-    parts.push("интересы: " + p.interests.slice(0, 15).map((i) => clip(i, 40)).join(", "));
-  if (Array.isArray(p.prompts))
-    p.prompts
-      .filter((x) => x?.question && x?.answer)
-      .slice(0, 3)
-      .forEach((x) => parts.push(clip(x.question, 120) + " — " + clip(x.answer, 300)));
+  const generate = async (nextRound: number) => {
+    setIsLoading(true);
+    setError(null);
 
-  return parts.join("; ") || "нет данных";
-}
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const me: ProfileInfo | undefined = body.me;
-    const other: ProfileInfo | undefined = body.other;
-    const recent: ChatLine[] = Array.isArray(body.recent) ? body.recent.slice(-8) : [];
-    const seed = clip(body.seed, 20);
+      if (!user) {
+        setError("Нужно войти в аккаунт.");
+        setIsLoading(false);
+        return;
+      }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+      const [meRes, otherRes] = await Promise.all([
+        supabase.from("profiles").select(PROFILE_FIELDS).eq("id", user.id).single(),
+        supabase.from("profiles").select(PROFILE_FIELDS).eq("id", targetUserId).single(),
+      ]);
 
-    if (!apiKey) {
-      return NextResponse.json({
-        suggestions: [],
-        error: "AI-помощник не настроен: нет GEMINI_API_KEY на сервере.",
-      });
-    }
-
-    const hasChat = recent.length > 0;
-
-    const chatText = recent
-      .map((m) => (m.mine ? "Я: " : "Собеседник: ") + clip(m.text, 300))
-      .join("\n");
-
-    const prompt =
-      "Ты — доброжелательный помощник в приложении знакомств Mingle. " +
-      (hasChat
-        ? "Пользователь уже переписывается с мэтчем. Предложи 3 разных варианта следующего сообщения от лица пользователя, которые естественно продолжают диалог."
-        : "Пользователь хочет написать мэтчу первое сообщение. Предложи 3 разных варианта первого сообщения от лица пользователя.") +
-      " Варианты должны отличаться по тону: один тёплый и простой, один с лёгким юмором, один с вопросом по интересам или анкете собеседника. " +
-      "Опирайся на конкретные детали анкеты собеседника, если они есть, и не придумывай факты, которых нет в данных. " +
-      "Каждый вариант — 1-2 коротких предложения, по-русски, на «ты», без банальных «привет, как дела», без пошлости и давления. " +
-      "Можно один уместный эмодзи.\n\n" +
-      "Анкета пользователя: " + describe(me) + "\n" +
-      "Анкета собеседника: " + describe(other) + "\n" +
-      (hasChat ? "\nПоследние сообщения:\n" + chatText + "\n" : "") +
-      (seed ? "\nВариант №" + seed + " (сделай варианты непохожими на предыдущие).\n" : "") +
-      '\nОтветь строго JSON-массивом из 3 строк, например ["вариант 1","вариант 2","вариант 3"]. Без пояснений и без markdown.';
-
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" +
-        apiKey,
-      {
+      const response = await fetch("/api/ai/icebreaker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 1,
-            maxOutputTokens: 2048,
-            responseMimeType: "application/json",
-          },
+          me: meRes.data,
+          other: otherRes.data,
+          recent: recentMessages || [],
+          seed: String(nextRound),
         }),
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("Ошибка Gemini API (icebreaker):", data);
-      return NextResponse.json({
-        suggestions: [],
-        error: "Не удалось получить ответ от AI: " + (data?.error?.message || "ошибка API"),
       });
-    }
 
-    const parts = data?.candidates?.[0]?.content?.parts || [];
-    const raw = parts
-      .filter((p: any) => !p.thought)
-      .map((p: any) => p.text || "")
-      .join("")
-      .trim();
+      const result = await response.json();
 
-    let suggestions: string[] = [];
-
-    try {
-      const cleaned = raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-      const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed)) {
-        suggestions = parsed.filter((x) => typeof x === "string");
+      if (result.error || !result.suggestions?.length) {
+        setError(result.error || "Не удалось получить варианты.");
+        setSuggestions([]);
+      } else {
+        setSuggestions(result.suggestions);
       }
-    } catch {
-      // запасной вариант: разбиваем по строкам
-      suggestions = raw
-        .split("\n")
-        .map((l: string) => l.replace(/^[\s\-\d.)"«]+|["»,]+$/g, "").trim())
-        .filter((l: string) => l.length > 5);
+    } catch (err) {
+      console.error("Ошибка AI-подсказок:", err);
+      setError("Не удалось связаться с AI-помощником.");
     }
 
-    suggestions = suggestions.map((s) => s.trim()).filter(Boolean).slice(0, 3);
+    setIsLoading(false);
+  };
+
+  const handleOpen = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+
+    setOpen(true);
 
     if (suggestions.length === 0) {
-      return NextResponse.json({
-        suggestions: [],
-        error: "Не удалось получить варианты. Попробуйте ещё раз.",
-      });
+      generate(0);
     }
+  };
 
-    return NextResponse.json({ suggestions });
-  } catch (err) {
-    console.error("Системная ошибка в /api/ai/icebreaker:", err);
-    return NextResponse.json({
-      suggestions: [],
-      error: "Ошибка при обращении к AI-помощнику. Попробуйте позже.",
-    });
-  }
+  const handleRefresh = () => {
+    const next = round + 1;
+    setRound(next);
+    generate(next);
+  };
+
+  return (
+    <div className={"relative " + (className || "")}>
+      <button
+        type="button"
+        onClick={handleOpen}
+        className="flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-bold px-3 py-1.5 rounded-full transition cursor-pointer"
+      >
+        ✨ Подсказать, что написать
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+
+          <div className="absolute bottom-full left-0 mb-2 z-20 w-80 max-w-[85vw] bg-white rounded-2xl shadow-lg border border-gray-100 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-black text-gray-900">Варианты от ИИ</p>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {isLoading ? (
+              <p className="text-[11px] text-gray-400 animate-pulse py-4 text-center">
+                Придумываю варианты...
+              </p>
+            ) : error ? (
+              <p className="text-[11px] text-red-500 py-2">{error}</p>
+            ) : (
+              <div className="space-y-1.5">
+                {suggestions.map((text, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      onPick(text);
+                      setOpen(false);
+                    }}
+                    className="w-full text-left bg-gray-50 hover:bg-pink-50 border border-gray-100 hover:border-pink-200 rounded-xl px-3 py-2 text-[11px] text-gray-700 transition cursor-pointer"
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!isLoading && (
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="w-full text-[11px] font-bold text-purple-600 hover:text-purple-700 py-1 cursor-pointer"
+              >
+                🔄 Другие варианты
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
