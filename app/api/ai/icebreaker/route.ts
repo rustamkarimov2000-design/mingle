@@ -78,30 +78,45 @@ export async function POST(request: NextRequest) {
       (seed ? "\nВариант №" + seed + " (сделай варианты непохожими на предыдущие).\n" : "") +
       '\nОтветь строго JSON-массивом из 3 строк, например ["вариант 1","вариант 2","вариант 3"]. Без пояснений и без markdown.';
 
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" +
-        apiKey,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 1,
-            maxOutputTokens: 2048,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    const callGemini = () =>
+      fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" +
+          apiKey,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 1,
+              maxOutputTokens: 2048,
+              responseMimeType: "application/json",
+            },
+          }),
+        }
+      );
 
-    const data = await response.json();
+    // Gemini иногда отвечает "высокая нагрузка" (503/429) — это временно, пробуем ещё раз
+    let response = await callGemini();
+    let data = await response.json();
+
+    for (let attempt = 1; attempt <= 3 && !response.ok; attempt++) {
+      const status = response.status;
+      if (status !== 503 && status !== 429 && status !== 500) break;
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+      response = await callGemini();
+      data = await response.json();
+    }
 
     if (!response.ok) {
       console.error("Ошибка Gemini API (icebreaker):", data);
+      const busy = response.status === 503 || response.status === 429;
       return NextResponse.json({
         suggestions: [],
-        error: "Не удалось получить ответ от AI: " + (data?.error?.message || "ошибка API"),
+        error: busy
+          ? "ИИ сейчас перегружен. Подождите минуту и нажмите «Другие варианты»."
+          : "Не удалось получить ответ от AI: " + (data?.error?.message || "ошибка API"),
       });
     }
 
